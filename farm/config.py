@@ -29,13 +29,12 @@ CONFIG = {
     "services": {"web": 9300, "crypto": 9400, "depot": 9500},
 
     # ---- exploits: one file per service exposing exploit(host, port, flag_id) ----
-    # LOCAL reuses the range's reference exploits. On test day point these at
-    # farm/sploits/<service>.py (your freshly written ones).
+    # Battle plugins live in farm/sploits/ (hardened: own timeouts, no exception
+    # leaks, flag_id-tolerant). The reference originals are services/<svc>/sploit.py.
     "sploit_paths": {
-        "web":    os.path.join(REPO, "services", "web", "sploit.py"),
-        "crypto": os.path.join(REPO, "services", "crypto", "sploit.py"),
-        "depot":  os.path.join(REPO, "services", "depot", "sploit.py"),
-        # "web": os.path.join(REPO, "farm", "sploits", "web.py"),
+        "web":    os.path.join(REPO, "farm", "sploits", "web.py"),
+        "crypto": os.path.join(REPO, "farm", "sploits", "crypto.py"),
+        "depot":  os.path.join(REPO, "farm", "sploits", "depot.py"),
     },
 
     # ---- attack data (public flag ids of attackable flags) ----
