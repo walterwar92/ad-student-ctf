@@ -19,6 +19,7 @@ then:  python farm/farm.py --config farm/config.forcad.py --once --dry-run
 """
 
 CONFIG = {
+    "db": "farm/battle_state.db",              # fresh battle DB (keep local test stats separate)
     "round_seconds": 60,                       # 2026 rules: round = 1 minute
     "flag_regex": r"[A-Z0-9]{31}=",
 
@@ -42,7 +43,7 @@ CONFIG = {
     # one exploit file per service. Names MUST match the attack_data task names.
     "sploit_paths": {
         "muha": "farm/sploits/muha.py",
-        # "vnek": "farm/sploits/vnek.py",                    # TODO: Go source review
+        "vnek": "farm/sploits/vnek.py",                     # vault IDOR + UUIDv1 reconstruct
         # "stillattached": "farm/sploits/stillattached.py",  # TODO: engine binary review
     },
 
@@ -58,7 +59,7 @@ CONFIG = {
         "url": "http://10.10.10.10/flags",
         "method": "PUT",
         "token_header": "X-Team-Token",
-        "token": "<<YOUR_TEAM_TOKEN>>",
+        "token": "76471e575ce80c65",
         "json_body": True,                     # ForcAD wants a JSON array
         "timeout": 10,
         # ---- v2 submit pacing ----
@@ -83,8 +84,9 @@ CONFIG = {
     "limits": {
         "flags_per_submit": 100,
         "min_seconds_between_submits": 1.0,    # be gentle with the jury
-        "exploit_timeout": 8,
-        "max_workers": 20,
+        "exploit_timeout": 40,                 # muha padding-oracle needs time
+        "max_workers": 6,                      # each muha job spawns its own oracle socket pool
+        "max_fids_per_target": 60,              # freshest N flag ids/target (muha oracle is slow)
     },
 
     # ---- v2 (all optional; safe defaults) ----
@@ -92,7 +94,7 @@ CONFIG = {
     "retry": {"max_tries": 40, "backoff": [2, 5, 10, 30]},
 
     "collectors": {
-        "hard_timeout": 10,
+        "hard_timeout": 40,                    # muha padding-oracle recovers a flag in ~15-20s
         "isolation": "thread",
         "subprocess_services": [],             # add pwn service names here (killable procs)
         "hot_reload": True,

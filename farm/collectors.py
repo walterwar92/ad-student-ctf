@@ -151,6 +151,9 @@ def _run_round(cfg, log, only_service=None, only_team=None, source="local"):
             host, port = resolve_addr(t, svc, base)
             fids = entry.get(svc) if entry else None
             if fids:
+                cap = cfg.get("limits", {}).get("max_fids_per_target")
+                if cap:
+                    fids = fids[:cap]     # attack the freshest N flag ids (slow exploits)
                 for fid in fids:
                     jobs.append((t, svc, host, port, fid, path))
             else:
