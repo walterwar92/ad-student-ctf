@@ -24,7 +24,7 @@ CONFIG = {
 
     "targets": {
         "mode": "from_attackdata",             # attack exactly the teams the server lists
-        "my_team_ip": "10.60.<<YOUR_TEAM_ID>>.2",   # <<-- your own box: never attack it
+        "my_team_ip": "10.60.7.2",             # our box = team7 "Prime" (VPN 10.61.7.8); never attack it
         "exclude_hosts": [],                   # 2026: teams are 10.60.1.2..10.60.10.2, no nop team.
                                                # from_attackdata already skips my_team_ip above.
     },
@@ -32,16 +32,16 @@ CONFIG = {
     # service name (must match the task name in attack_data) -> port on the team box.
     # Fill ports once the services are published. Last year's services:
     "services": {
-        "workflow": 0,         # <<-- real port
-        "zounds": 0,           # <<-- real port
-        "secretscribble": 0,   # <<-- real port
+        "muha": 8000,          # gunicorn app; attack-data hint {"fly_id","memory_id"}
+        "StillAttached": 18080, # "remote debug workspace"; hint {"target","tid"}
+        "vnek": 28080,         # hint {"username": "..."}
     },
 
     # one exploit file per service (write these on the day from EXPLOIT_PROMPT_TEMPLATE.md)
     "sploit_paths": {
-        "workflow": "farm/sploits/workflow.py",
-        "zounds": "farm/sploits/zounds.py",
-        "secretscribble": "farm/sploits/secretscribble.py",
+        "muha": "farm/sploits/muha.py",
+        "StillAttached": "farm/sploits/StillAttached.py",
+        "vnek": "farm/sploits/vnek.py",
     },
 
     "attackdata": {

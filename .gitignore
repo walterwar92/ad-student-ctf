@@ -5,9 +5,12 @@
 *.db-shm
 # native-run working dirs (run_local.py)
 run/
+# boot/run logs from the local launchers — runtime output, not source
+*_boot.log
 
 # farm runtime + any real-platform configs (may hold your team token — don't commit)
 farm/farm.log
+farm/webgui_run.log
 farm/config.local.py
 farm/config.prod.py
 
