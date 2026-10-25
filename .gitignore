@@ -14,6 +14,9 @@ farm/config.prod.py
 # defense runtime
 defense/filter.log
 *.pcap
+# checkerwatch: identified checker ip + captured attacker requests (game-specific)
+defense/checker.json
+defense/live_exploits/
 
 # python
 **/__pycache__/
