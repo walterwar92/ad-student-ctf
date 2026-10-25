@@ -24,7 +24,7 @@ CONFIG = {
 
     "targets": {
         "mode": "from_attackdata",             # attack exactly the teams the server lists
-        "my_team_ip": "10.60.<<YOUR_TEAM_ID>>.2",   # <<-- your own box: never attack it
+        "my_team_ip": "10.60.7.2",             # our box = team7; never attack it
         "exclude_hosts": [],                   # 2026: teams are 10.60.1.2..10.60.10.2, no nop team.
                                                # from_attackdata already skips my_team_ip above.
     },

@@ -34,3 +34,7 @@ farm/config.prod.py
 *.conf
 deploy/wg-multi/conf/*
 !deploy/wg-multi/conf/.gitkeep
+
+# boot/run logs from local launchers + farm web gui log — runtime output
+*_boot.log
+farm/webgui_run.log
