@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import os
 import socketserver
 import secrets
@@ -16,6 +18,8 @@ MAX_LINE = 65536
 def safe_name(name):
     if not name:
         return False
+    if "\x00" in name:          # NUL would bypass the checks below and crash open()
+        return False
     if "/" in name or "\\" in name:
         return False
     if ".." in name:
@@ -25,17 +29,35 @@ def safe_name(name):
     return True
 
 
+def _pass_path(user):
+    return os.path.join(BASE, user, ".pass")
+
+
+def _hash_pw(password):
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
 def register(user, password):
     if not safe_name(user):
         return "ERR badname"
     with LOCK:
-        if user in USERS:
+        udir = os.path.join(BASE, user)
+        # Refuse if the account exists in memory OR already has a directory on
+        # disk. Accounts live only in RAM, but flag files persist on disk; after
+        # any restart (patch redeploy / supervisor / round reset) USERS is empty,
+        # so without the on-disk check a rival could re-REGISTER a victim's name,
+        # reuse its existing flag files, and read the flag. Persisting the
+        # (hashed) password also keeps AUTH working across restarts (SLA).
+        if user in USERS or os.path.isdir(udir):
             return "ERR exists"
+        pw_hash = _hash_pw(password)
         try:
-            os.makedirs(os.path.join(BASE, user), exist_ok=True)
+            os.makedirs(udir, exist_ok=True)
+            with open(_pass_path(user), "w", encoding="utf-8") as fh:
+                fh.write(pw_hash)
         except OSError:
             return "ERR io"
-        USERS[user] = password
+        USERS[user] = pw_hash
         token = secrets.token_hex(16)
         TOKENS[token] = user
         return "OK " + token
@@ -44,7 +66,17 @@ def register(user, password):
 def auth(user, password):
     with LOCK:
         stored = USERS.get(user)
-        if stored is None or stored != password:
+        if stored is None:
+            # Repopulate from the persisted credential so AUTH (and the checker's
+            # get()) keep working after a restart.
+            try:
+                with open(_pass_path(user), "r", encoding="utf-8") as fh:
+                    stored = fh.read().strip()
+            except OSError:
+                stored = None
+            if stored:
+                USERS[user] = stored
+        if stored is None or not hmac.compare_digest(stored, _hash_pw(password)):
             return "ERR badcreds"
         token = secrets.token_hex(16)
         TOKENS[token] = user
@@ -58,6 +90,8 @@ def put(token, key, value):
         return "ERR badtoken"
     if not safe_name(key):
         return "ERR badkey"
+    if len(value) > 4096:          # bound disk use; checker values are ~24 bytes
+        return "ERR toobig"
     path = os.path.join(BASE, user, key)
     try:
         with open(path, "w", encoding="utf-8") as fh:
@@ -134,10 +168,21 @@ def dispatch(line):
     return "ERR unknown", False
 
 
+_CONN_SEM = threading.BoundedSemaphore(128)   # cap concurrent conns (anti flood/slowloris); 128 >> checker's 1/round
+
+
 class Handler(socketserver.StreamRequestHandler):
-    timeout = 30
+    timeout = 10
 
     def handle(self):
+        if not _CONN_SEM.acquire(blocking=False):
+            # Shed load instead of letting thread/FD count grow without bound.
+            try:
+                self.wfile.write(b"ERR busy\n")
+                self.wfile.flush()
+            except Exception:
+                pass
+            return
         try:
             while True:
                 raw = self.rfile.readline(MAX_LINE)
@@ -153,6 +198,8 @@ class Handler(socketserver.StreamRequestHandler):
                     break
         except Exception:
             pass
+        finally:
+            _CONN_SEM.release()
 
 
 class Server(socketserver.ThreadingTCPServer):
