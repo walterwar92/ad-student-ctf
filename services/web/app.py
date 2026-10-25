@@ -13,6 +13,10 @@ DATA_DIR = os.environ.get("DATA_DIR") or os.path.join(os.getcwd(), "data")
 DB_PATH = os.path.join(DATA_DIR, "web.db")
 
 app = Flask(__name__)
+# Cap request body size: without this a single oversized POST is buffered into
+# RAM and can OOM the process -> the vulnbox supervisor then takes the WHOLE box
+# (web+crypto+depot) down. The checker only ever sends sub-kilobyte bodies.
+app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -54,7 +58,9 @@ def _current_user():
 
 @app.route("/api/register", methods=["POST"])
 def register():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
     username = data.get("username")
     password = data.get("password")
     if not isinstance(username, str) or not isinstance(password, str) \
@@ -77,7 +83,9 @@ def register():
 
 @app.route("/api/login", methods=["POST"])
 def login():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
     username = data.get("username")
     password = data.get("password")
     if not isinstance(username, str) or not isinstance(password, str):
@@ -96,7 +104,9 @@ def create_note():
     uid = _current_user()
     if uid is None:
         return jsonify({"error": "unauthorized"}), 401
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
     title = data.get("title")
     body = data.get("body")
     if not isinstance(title, str) or not isinstance(body, str):

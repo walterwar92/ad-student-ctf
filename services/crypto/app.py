@@ -7,6 +7,10 @@ from flask import Flask, jsonify, request
 from aescipher import AES  # self-contained AES-CTR (no external crypto dependency)
 
 app = Flask(__name__)
+# Cap request body size: the self-contained AES-CTR is pure Python and its cost
+# grows superlinearly, so a large secret stalls the worker past the checker's
+# 5s timeout (and multi-MB bodies OOM the box). The checker sends tiny bodies.
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
 
 DEFAULT_PORT = 5002
 
@@ -23,6 +27,10 @@ def store():
         return jsonify({"error": "owner and secret required"}), 400
     owner = str(data["owner"])
     secret = str(data["secret"])
+    # Bound input before any (superlinear, pure-Python) crypto work. Checker
+    # owners are ~13 chars and secrets/flags are <= 32 bytes.
+    if len(owner) > 256 or len(secret.encode("utf-8")) > 4096:
+        return jsonify({"error": "too large"}), 400
     item_id = secrets.token_hex(4)
     token = secrets.token_hex(16)
     # Fresh random nonce per item -> every item has a distinct keystream, so
@@ -65,6 +73,10 @@ def reveal():
         return jsonify({"error": "id and token required"}), 400
     item_id = str(data["id"])
     token = str(data["token"])
+    # hmac.compare_digest raises TypeError on non-ASCII str; tokens are 32 hex
+    # chars, so reject anything else up front (otherwise it is an unhandled 500).
+    if len(token) != 32 or any(c not in "0123456789abcdef" for c in token):
+        return jsonify({"error": "forbidden"}), 403
     with _lock:
         it = _store.get(item_id)
         if it is None:
