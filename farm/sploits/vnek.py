@@ -21,6 +21,12 @@ not patch are still open. We don't even need to be given the uuid, because:
 
   Then: GET /api/vault?uuid=<victim_uuid> -> {"secret": "<FLAG>"}.
 
+  CONFIRMED on the live box: the pre-patch handler is exactly
+      u, _ := service.Vault(ctx, r.URL.Query().Get("uuid"))   // any uuid, no requireUser
+      respond(200, {"uuid": u.ID, "secret": u.Secret})
+  and victim-uuid reconstruction from a *different* user's node/clock_seq +
+  the victim's public `created` reproduced the real uuid exactly.
+
 flag_id semantics (robust to whatever attack_data gives):
   * a UUID            -> read that vault directly (no reconstruction needed).
   * a username        -> /api/profile -> created -> reconstruct uuid -> vault.
