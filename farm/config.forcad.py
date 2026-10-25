@@ -24,26 +24,27 @@ CONFIG = {
 
     "targets": {
         "mode": "from_attackdata",             # attack exactly the teams the server lists
-        "my_team_ip": "10.60.<<YOUR_TEAM_ID>>.2",   # <<-- your own box: never attack it
+        "my_team_ip": "10.60.7.2",             # Prime = team 7 (pre-game audit); never attack it
         "exclude_hosts": [],                   # 2026: teams are 10.60.1.2..10.60.10.2, no nop team.
                                                # from_attackdata already skips my_team_ip above.
     },
 
     # service name (must match the task name in attack_data) -> port on the team box.
-    # 2026 Team7 range (ports read from /opt/services/*/compose.yml on the box;
-    # same service => same port on every team box 10.60.N.2). Verify names against
-    # the attack_data task keys on game day.
+    # 2026 services, from the pre-game audit (ports are the public ones on 10.60.N.2).
+    # A service with no sploit_paths entry (or a missing file) is simply skipped, so
+    # vnek/StillAttached stay listed as reminders until their exploits are written.
     "services": {
-        "muha": 8000,            # Python/Flask (gunicorn)
-        "vnek": 28080,           # Go + postgres (published 28080 -> container 8080)
-        "stillattached": 18080,  # Python FastAPI web (+ compiled engine :31337, internal)
+        "muha": 8000,            # Flask/SQLite "ферма мух" — sploit READY
+        "vnek": 28080,           # Go "вНеконтакте" — TODO: farm/sploits/vnek.py
+        "StillAttached": 18080,  # FastAPI web + pwn engine (engine:31337 internal) — TODO
     },
 
-    # one exploit file per service. Names MUST match the attack_data task names.
+    # one exploit file per service (write the rest on the day from EXPLOIT_PROMPT_TEMPLATE.md).
+    # Confirm each name matches the checker's task name in attack_data before relying on it.
     "sploit_paths": {
         "muha": "farm/sploits/muha.py",
-        # "vnek": "farm/sploits/vnek.py",                    # TODO: Go source review
-        # "stillattached": "farm/sploits/stillattached.py",  # TODO: engine binary review
+        # "vnek": "farm/sploits/vnek.py",
+        # "StillAttached": "farm/sploits/stillattached.py",
     },
 
     "attackdata": {
