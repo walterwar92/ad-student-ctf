@@ -1,0 +1,52 @@
+CREATE TABLE IF NOT EXISTS app_meta (
+ key TEXT PRIMARY KEY,
+ value BYTEA NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS users (
+ id UUID PRIMARY KEY,
+ username VARCHAR(25) NOT NULL UNIQUE,
+ display_name VARCHAR(60) NOT NULL,
+ password_hash TEXT NOT NULL,
+ bio VARCHAR(500) NOT NULL DEFAULT '',
+ secret VARCHAR(512) NOT NULL DEFAULT '',
+ created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+ token TEXT PRIMARY KEY,
+ user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS posts (
+ id TEXT PRIMARY KEY,
+ author_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ body VARCHAR(2000) NOT NULL,
+ photo_url TEXT NOT NULL DEFAULT '',
+ created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS messages (
+ id TEXT PRIMARY KEY,
+ from_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ to_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ body VARCHAR(2000) NOT NULL,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages(from_id, to_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+
+CREATE TABLE IF NOT EXISTS post_likes (
+ post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+ user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+ PRIMARY KEY (post_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_post_likes_user ON post_likes(user_id);

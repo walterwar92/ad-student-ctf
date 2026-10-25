@@ -1,0 +1,34 @@
+package httpapi
+
+import "net/http"
+
+func (a *API) vaultSet(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	u := a.requireUser(w, r)
+	if u == nil {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		problem(w, 400, "Неверная форма")
+		return
+	}
+	if err := a.service.SetVault(r.Context(), u.ID, r.FormValue("secret")); err != nil {
+		reportError(w, err)
+		return
+	}
+	respond(w, 200, map[string]bool{"ok": true})
+}
+
+func (a *API) vault(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	u, err := a.service.Vault(r.Context(), r.URL.Query().Get("uuid"))
+	if err != nil {
+		problem(w, 404, "Unknown UUID")
+		return
+	}
+	respond(w, 200, map[string]string{"uuid": u.ID, "secret": u.Secret})
+}

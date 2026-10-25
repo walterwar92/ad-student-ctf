@@ -1,0 +1,65 @@
+name: vnek
+services:
+  app:
+    restart: unless-stopped
+    cpus: 1
+    environment:
+      DATABASE_URL: postgres://vnekontakta:change_me_for_deployment@postgres:5432/vnekontakta?sslmode=disable
+      TTL_SECONDS: "1800"
+    image: vnek:latest
+    mem_limit: "1610612736"
+    networks:
+      default: null
+    volumes:
+      - type: volume
+        source: uploads_data
+        target: /app/uploads
+        volume: {}
+      - type: bind
+        source: /opt/services/vnek/photo/photo-worker
+        target: /usr/local/bin/photo-worker
+        read_only: true
+        bind: {}
+    build:
+      context: /opt/services/vnek
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: true
+    ports:
+      - mode: ingress
+        host_ip: 10.60.7.2
+        target: 8080
+        published: "28080"
+        protocol: tcp
+  postgres:
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vnekontakta
+      POSTGRES_PASSWORD: change_me_for_deployment
+      POSTGRES_USER: vnekontakta
+    image: postgres:16-alpine
+    mem_limit: "268435456"
+    networks:
+      default: null
+    volumes:
+      - type: volume
+        source: postgres_data
+        target: /var/lib/postgresql/data
+        volume: {}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U vnekontakta -d vnekontakta
+      timeout: 3s
+      interval: 5s
+      retries: 15
+networks:
+  default:
+    name: vnek_default
+volumes:
+  postgres_data:
+    name: vnek_postgres_data
+  uploads_data:
+    name: vnek_uploads_data
