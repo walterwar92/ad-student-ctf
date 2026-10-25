@@ -30,18 +30,20 @@ CONFIG = {
     },
 
     # service name (must match the task name in attack_data) -> port on the team box.
-    # Fill ports once the services are published. Last year's services:
+    # 2026 Team7 range (ports read from /opt/services/*/compose.yml on the box;
+    # same service => same port on every team box 10.60.N.2). Verify names against
+    # the attack_data task keys on game day.
     "services": {
-        "workflow": 0,         # <<-- real port
-        "zounds": 0,           # <<-- real port
-        "secretscribble": 0,   # <<-- real port
+        "muha": 8000,            # Python/Flask (gunicorn)
+        "vnek": 28080,           # Go + postgres (published 28080 -> container 8080)
+        "stillattached": 18080,  # Python FastAPI web (+ compiled engine :31337, internal)
     },
 
-    # one exploit file per service (write these on the day from EXPLOIT_PROMPT_TEMPLATE.md)
+    # one exploit file per service. Names MUST match the attack_data task names.
     "sploit_paths": {
-        "workflow": "farm/sploits/workflow.py",
-        "zounds": "farm/sploits/zounds.py",
-        "secretscribble": "farm/sploits/secretscribble.py",
+        "muha": "farm/sploits/muha.py",
+        # "vnek": "farm/sploits/vnek.py",                    # TODO: Go source review
+        # "stillattached": "farm/sploits/stillattached.py",  # TODO: engine binary review
     },
 
     "attackdata": {
