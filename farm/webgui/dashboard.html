@@ -1,0 +1,1747 @@
+<!doctype html>
+<!--
+  Dashboard UI — standalone single-page frontend · terminal theme (green on black).
+  Edit this file freely; a preview server (mock_server.py) re-reads it from disk
+  on every request, so just save and refresh. Pure static HTML/CSS/JS, no build
+  step, no frameworks, no external resources.
+  Runtime options come from /api/settings. Data from
+  /api/stats|list1|list2|list3|log. Actions POST to /api/action. See README.md.
+  Every visible label lives in the UI object at the top of the script.
+  Keys: ? help · : command line · , settings · p pause · / search · 1-6 panels.
+-->
+<html lang="en" class="crt"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark"><meta name="theme-color" content="#030604">
+<title>dashboard</title>
+<link rel="icon" id="fav" href="data:,">
+<style>
+:root{
+  color-scheme:dark;
+  --fs:13px;--rp:4px;--scan:3px;--sl:1px;
+  --bg:#030604;--bg2:#07110a;--bg3:#0a170d;--sel:#0e2614;
+  --hi:#d4ffdd;--g:#3dff74;--g-rgb:61,255,116;--fg:#b4f3c4;--dim:#62a074;--faint:#1d5a2c;
+  --line:#143c20;--line2:#1f6b34;
+  --amb:#ffb84d;--red:#ff6b5e;--cy:#5ff2e6;--amb-bg:#2a1d06;--red-bg:#2c0e0b;
+  --mono:"Cascadia Mono","Cascadia Code","JetBrains Mono","Fira Code","SF Mono",Menlo,Consolas,"DejaVu Sans Mono","Liberation Mono",ui-monospace,monospace;
+}
+html.compact{--rp:1px}
+*{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--line2)}
+::-webkit-scrollbar-track,::-webkit-scrollbar-corner{background:transparent}
+::selection{background:var(--g);color:#000;text-shadow:none}
+[hidden]{display:none!important}
+html{background:var(--bg)}
+body{margin:0;min-height:100vh;padding-bottom:40px;background:var(--bg);color:var(--fg);
+  font:var(--fs)/1.5 var(--mono);font-variant-numeric:tabular-nums;font-variant-emoji:text;
+  -webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%}
+
+/* ── CRT glass: vignette + device-pixel-snapped scanlines ─────────────── */
+.crt body::before{content:"";position:fixed;inset:0;z-index:90;pointer-events:none;transform:translateZ(0);
+  background:radial-gradient(ellipse 120% 95% at 50% 50%,transparent 58%,rgba(0,0,0,.55) 100%)}
+.crt body::after{content:"";position:fixed;inset:0;z-index:91;pointer-events:none;transform:translateZ(0);opacity:.5;
+  background:repeating-linear-gradient(180deg,transparent 0,transparent calc(var(--scan) - var(--sl)),
+    rgba(0,0,0,.34) calc(var(--scan) - var(--sl)),rgba(0,0,0,.34) var(--scan))}
+
+.c-g{color:var(--g)}.c-c{color:var(--cy)}.c-r{color:var(--red)}.c-a{color:var(--amb)}.c-d{color:var(--dim)}.c-h{color:var(--hi)}
+.k{color:var(--dim)}
+.grow{flex:1}
+.skip{position:absolute;left:-999px;top:0;z-index:100;padding:2px 8px;background:var(--g);color:#000}
+.skip:focus{left:8px}
+:focus-visible{outline:1px dashed var(--hi);outline-offset:2px}
+kbd{font:inherit;font-size:.86em;padding:0 .5ch;color:#000;background:var(--dim);white-space:nowrap}
+mark{background:var(--g);color:#000}
+
+/* ── controls: keycaps & prompt fields ────────────────────────────────── */
+button{font:inherit;line-height:1.5;color:var(--g);background:none;border:0;border-radius:0;margin:0;padding:0 .15ch;
+  cursor:pointer;white-space:nowrap;text-transform:uppercase;letter-spacing:.03em}
+button::before{content:"[";color:var(--dim)}
+button::after{content:"]";color:var(--dim)}
+button:hover{background:var(--g);color:#000}
+button:hover::before,button:hover::after{color:#000}
+button:active{background:var(--hi)}
+button[aria-pressed=true]{color:#000;background:var(--g)}
+button[aria-pressed=true]::before,button[aria-pressed=true]::after{color:#000}
+button:disabled{color:var(--faint);background:none;cursor:default}
+button:disabled::before,button:disabled::after{color:var(--faint)}
+button.warn{color:var(--amb)}
+button.warn:hover{background:var(--amb);color:#000}
+button.ib{color:var(--dim);text-transform:none}
+button.ib:hover{color:#000}
+button.dirty{color:var(--hi);background:rgba(var(--g-rgb),.14)}
+button.dirty::after{content:"]*"}
+button.dirty:hover{color:#000;background:var(--g)}
+button.armed,button.armed:hover{color:#000;background:var(--amb);animation:armed 1s steps(1) infinite}
+button.armed::before,button.armed::after{color:inherit}
+@keyframes armed{50%{color:var(--amb);background:none}}
+button.busy{color:var(--dim);background:none;cursor:progress}
+input,select{font:inherit;color:var(--hi);background:var(--bg);border:1px solid var(--line2);border-radius:0;padding:1px 6px;
+  caret-color:var(--g);outline:none;min-width:0}
+select{cursor:pointer;padding-right:2px}
+option{background:var(--bg3);color:var(--fg)}
+input::placeholder{color:var(--faint);opacity:1}
+input:focus,select:focus{border-color:var(--g);box-shadow:0 0 0 1px rgba(var(--g-rgb),.22),0 0 14px rgba(var(--g-rgb),.14)}
+input:focus-visible,select:focus-visible{outline:none}
+input[aria-invalid=true]{border-color:var(--red);box-shadow:0 0 0 1px rgba(255,107,94,.3)}
+input[type=number]{-moz-appearance:textfield;appearance:textfield}
+input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.edited{border-color:var(--amb)}
+
+/* ── header ───────────────────────────────────────────────────────────── */
+.top{position:sticky;top:0;z-index:30;display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;padding:8px 16px;
+  background:var(--bg3);border-bottom:1px solid var(--line2);box-shadow:0 6px 18px rgba(0,0,0,.6)}
+.top::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;pointer-events:none;opacity:0;
+  background:linear-gradient(90deg,transparent,var(--flip,var(--g)),transparent) no-repeat;background-size:40% 100%;background-position:-70% 0}
+.top.flip::after{animation:flip .7s ease-out}
+@keyframes flip{from{opacity:1;background-position:-70% 0}to{opacity:1;background-position:170% 0}}
+#prog{position:absolute;left:0;right:0;bottom:-1px;height:2px;display:block;pointer-events:none;
+  transform-origin:0 50%;transform:scaleX(0);background:var(--g);opacity:.5}
+#prog.run{transform:scaleX(1);transition:transform var(--wait,1.5s) linear}
+#prog.pause{transform:scaleX(1);background:var(--cy);opacity:.35}
+#prog.err{background:var(--red)}
+.brand{white-space:nowrap;font-weight:700}
+.brand .pr{color:var(--dim);font-weight:400;margin-right:1ch}
+.brand b{color:var(--g);letter-spacing:.18em;text-transform:uppercase}
+.cur{display:inline-block;width:.62em;height:1.1em;margin-left:3px;vertical-align:-.2em;background:var(--g);animation:blink 1.06s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.crt .brand b{text-shadow:0 0 1px currentColor,0 0 9px rgba(var(--g-rgb),.55)}
+.crt .cur{box-shadow:0 0 9px rgba(var(--g-rgb),.65)}
+.state{padding:0 .9ch;font-weight:800;letter-spacing:.14em;white-space:nowrap;color:#000;background:var(--dim)}
+.state.on{background:var(--g)}
+.state.off{background:var(--amb)}
+.crt .state.on{box-shadow:0 0 16px rgba(var(--g-rgb),.4)}
+.crt .state.off{box-shadow:0 0 16px rgba(255,184,77,.35)}
+.meta{display:flex;flex-wrap:wrap;align-items:center;white-space:nowrap}
+.meta>span+span::before{content:"│";color:var(--faint);margin:0 1.1ch}
+.meta b{color:var(--hi);font-weight:400}
+.ctl{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+.fld{display:inline-flex;align-items:center;gap:.5ch;color:var(--dim);white-space:nowrap}
+.fld>span::after,.search>span::after{content:">";color:var(--g);margin-left:.2ch}
+#f-rate{width:9ch;text-align:right}
+.srv{color:var(--amb);font-size:.85em;white-space:nowrap}
+.srv:empty{display:none}
+.hbtns{display:flex;gap:.6ch}
+
+/* ── layout ───────────────────────────────────────────────────────────── */
+main{max-width:1560px;margin:0 auto;padding:26px 16px 18px;display:grid;gap:26px}
+main.power{animation:power .5s ease-out}
+@keyframes power{from{opacity:0;filter:brightness(2.4);transform:scaleY(.985)}}
+.row21,.row11,.row75{display:grid;gap:26px 16px;min-width:0}
+.row21{grid-template-columns:minmax(0,2fr) minmax(0,1fr)}
+.row11{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.row75{grid-template-columns:minmax(0,1fr)}
+@media(min-width:1440px){
+  .row75{grid-template-columns:minmax(0,7fr) minmax(0,5fr)}
+  .row75 .scroll,.row75 .log{height:430px;max-height:none}
+}
+@media(max-width:1000px){.row21,.row11{grid-template-columns:minmax(0,1fr)}}
+
+/* ── metric tiles ─────────────────────────────────────────────────────── */
+.kpis{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));transition:opacity .3s}
+.kpis.stale{opacity:.5}
+.kpi{--c:var(--g);position:relative;min-width:0;padding:8px 12px 8px 15px;background:var(--bg2);border:1px solid var(--line)}
+.kpi::before{content:"";position:absolute;left:-1px;top:-1px;bottom:-1px;width:3px;background:var(--c)}
+.kpi:hover{border-color:var(--line2)}
+.kpi .l{display:flex;justify-content:space-between;gap:1ch;font-size:.8em;color:var(--dim);letter-spacing:.12em;text-transform:uppercase;white-space:nowrap}
+.kpi .l span:first-child{overflow:hidden;text-overflow:ellipsis}
+.kpi .d{color:var(--cy);letter-spacing:0;text-transform:none}
+.kpi .n{font-size:2.1em;font-weight:700;line-height:1.25;color:var(--c);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.crt .kpi .n{text-shadow:0 0 1px currentColor,0 0 10px color-mix(in srgb,var(--c) 45%,transparent)}
+.kpi .n.bump{animation:bump .8s ease-out}
+@keyframes bump{from{color:var(--hi);text-shadow:0 0 16px var(--c)}}
+.sp{display:flex;align-items:flex-end;gap:1px;height:16px;margin-top:4px}
+.sp i{flex:1;min-width:1px;height:0;background:var(--c);opacity:.3;transition:height .3s}
+.sp i:last-child{opacity:.95}
+
+/* ── panels: TUI frames with the title inset into the border ──────────── */
+.panel{position:relative;min-width:0;padding:18px 14px 12px;background:var(--bg2);border:1px solid var(--line);
+  scroll-margin-top:90px;outline:none;box-shadow:inset 0 0 40px rgba(var(--g-rgb),.03)}
+.panel:hover{border-color:var(--line2)}
+.panel:focus-within{border-color:var(--line2);
+  box-shadow:inset 0 0 40px rgba(var(--g-rgb),.03),0 0 0 1px rgba(var(--g-rgb),.1),0 0 22px -6px rgba(var(--g-rgb),.45)}
+.panel.stale{border-style:dashed;border-color:#7a5516}
+.panel.ping{animation:ping 1s ease-out}
+@keyframes ping{from{box-shadow:0 0 0 2px var(--g),0 0 40px rgba(var(--g-rgb),.4)}}
+.ph{position:absolute;top:-.8em;left:10px;right:10px;display:flex;align-items:center;gap:10px;line-height:1.6;pointer-events:none}
+.ph>*{pointer-events:auto;padding:0 .6ch;background:linear-gradient(180deg,var(--bg) 50%,var(--bg2) 50%)}
+.pt{color:var(--g);font-weight:700;letter-spacing:.14em;text-transform:uppercase;font-size:.9em;white-space:nowrap}
+.pt kbd{margin-right:.8ch;letter-spacing:0}
+.panel:focus-within .pt kbd{background:var(--g)}
+.crt .pt{text-shadow:0 0 8px rgba(var(--g-rgb),.5)}
+.pm,.ps{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.85em;color:var(--dim)}
+.ps{color:var(--amb)}
+.pm:empty,.ps:empty{display:none}
+.pa{margin-left:auto;display:flex;gap:.5ch;white-space:nowrap}
+.panel.fold{padding-top:12px;padding-bottom:2px}
+.panel.fold>:not(.ph){display:none}
+#veil{position:fixed;inset:0;z-index:36;background:rgba(0,0,0,.72)}
+body.maxed{overflow:hidden}
+.panel.max{position:fixed;inset:22px 16px 42px;z-index:38;display:flex;flex-direction:column;border:3px double var(--line2);
+  box-shadow:0 0 0 1px rgba(var(--g-rgb),.15),0 30px 80px rgba(0,0,0,.9)}
+.panel.max .scroll,.panel.max .logwrap{flex:1;min-height:0;max-height:none;height:auto}
+.panel.max .log{height:100%}
+.panel.max .chart{flex:1;height:auto;min-height:200px}
+.foot{display:flex;flex-wrap:wrap;gap:2px 2ch;margin-top:6px;color:var(--dim);font-size:.85em}
+.foot b{color:var(--hi);font-weight:400}
+.foot:empty{display:none}
+.tools{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin:0 0 10px}
+.chips{display:inline-flex;flex-wrap:wrap;gap:2px .8ch}
+.chip{--c:var(--g);color:var(--fg);text-transform:none}
+.chip .gl{color:var(--c);margin-right:.4ch}
+.chip .n{color:var(--dim);margin-left:.6ch;font-size:.88em}
+.chip .n:empty{display:none}
+.chip:hover,.chip[aria-pressed=true]{background:var(--c);color:#000}
+.chip:hover .gl,.chip:hover .n,.chip[aria-pressed=true] .gl,.chip[aria-pressed=true] .n{color:#000}
+.search{display:inline-flex;align-items:center;gap:.5ch;color:var(--dim);min-width:0}
+.search input{width:22ch}
+.hint{font-size:.85em;white-space:nowrap}
+.hint:empty{display:none}
+.empty{padding:16px 10px;text-align:center;color:var(--dim)}
+.empty::before{content:"-- "}.empty::after{content:" --"}
+
+/* ── chart & distribution ─────────────────────────────────────────────── */
+.chart{position:relative;height:170px}
+.chart canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair;touch-action:pan-y}
+.tip{position:absolute;z-index:3;pointer-events:none;transform:translate(-50%,calc(-100% - 6px));padding:0 .8ch;
+  white-space:nowrap;font-size:.85em;color:#000;background:var(--g);box-shadow:0 0 14px rgba(var(--g-rgb),.45)}
+.dist{display:grid;grid-template-columns:max-content minmax(40px,1fr) max-content max-content;gap:9px 1.4ch;align-items:center;padding-top:4px}
+.dk{max-width:16ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--hi)}
+.mtr{position:relative;height:.9em;background:repeating-linear-gradient(90deg,rgba(var(--g-rgb),.13) 0 6px,transparent 6px 8px)}
+.mtr i{position:absolute;inset:0 auto 0 0;width:0;background:repeating-linear-gradient(90deg,var(--g) 0 6px,transparent 6px 8px);
+  transition:width .5s cubic-bezier(.2,.8,.2,1)}
+.mtr i.top{background:repeating-linear-gradient(90deg,var(--hi) 0 6px,transparent 6px 8px)}
+.crt .mtr i{filter:drop-shadow(0 0 3px rgba(var(--g-rgb),.6))}
+.dp{text-align:right;color:var(--g)}
+.dn{text-align:right;color:var(--dim)}
+.dsum{color:var(--dim)}
+.drule{height:0;border-top:1px dashed var(--line2)}
+.dist .empty{grid-column:1/-1}
+
+/* ── tables ───────────────────────────────────────────────────────────── */
+.scroll{max-height:340px;overflow:auto;overscroll-behavior:contain}
+table{width:100%;border-collapse:separate;border-spacing:0}
+th,td{padding:var(--rp) 10px;text-align:left;white-space:nowrap}
+td{border-bottom:1px dotted rgba(31,107,52,.5)}
+th{position:sticky;top:0;z-index:2;background:var(--bg2);color:var(--dim);font-weight:400;font-size:.82em;letter-spacing:.12em;
+  text-transform:uppercase;border-bottom:1px solid var(--line2);user-select:none}
+th.sort{cursor:pointer}
+th.sort:hover{color:var(--g)}
+th[aria-sort=ascending]::after{content:" ▲";color:var(--g)}
+th[aria-sort=descending]::after{content:" ▼";color:var(--g)}
+.num{text-align:right}
+tbody tr:hover{background:var(--sel)}
+tbody tr:hover>td:first-child{box-shadow:inset 2px 0 0 var(--g)}
+tr.dis>td:not(.act){opacity:.45}
+tr.born>td{animation:flash 1.1s ease-out}
+td.flash{animation:flash .9s ease-out}
+@keyframes flash{from{background:rgba(var(--g-rgb),.22);color:var(--hi)}}
+td.act{text-align:right;padding-top:0;padding-bottom:0}
+.acts{display:inline-flex;gap:.8ch}
+.key{color:var(--hi);font-weight:700}
+[data-copy]{cursor:copy}
+[data-copy]:hover{text-decoration:underline dotted}
+td.tok{max-width:36ch;overflow:hidden;text-overflow:ellipsis;color:var(--cy)}
+.tag{white-space:pre;font-weight:700}
+.tag.ok{color:var(--g)}
+.tag.hold{color:var(--amb);background:var(--amb-bg)}
+.tag.off{color:var(--red);background:var(--red-bg)}
+.st{white-space:nowrap;cursor:pointer}
+.st .gl{margin-right:.6ch}
+.st:hover{text-decoration:underline dotted}
+.mm{position:relative;display:inline-block;width:6ch;height:.6em;margin-right:1ch;vertical-align:.05em;
+  background:repeating-linear-gradient(90deg,rgba(var(--g-rgb),.14) 0 5px,transparent 5px 7px)}
+.mm i{position:absolute;inset:0 auto 0 0;background:repeating-linear-gradient(90deg,currentColor 0 5px,transparent 5px 7px)}
+
+/* ── log ──────────────────────────────────────────────────────────────── */
+.logwrap{position:relative}
+.log{height:320px;overflow:auto;overscroll-behavior:contain;overflow-anchor:none;padding:4px 0;background:var(--bg);border:1px solid var(--line)}
+.ln{display:grid;grid-template-columns:8ch 5ch minmax(4ch,9ch) minmax(0,1fr);gap:1.2ch;padding:0 8px;border-left:2px solid transparent}
+.ln:hover{background:var(--sel)}
+.ln>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ln .ts,.ln .lv{color:var(--dim)}
+.ln .kd{color:var(--hi)}
+.ln .msg{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--fg)}
+.ln.lv-WARN{background:rgba(255,184,77,.05)}
+.ln.lv-WARN .lv,.ln.lv-WARN .msg{color:var(--amb)}
+.ln.lv-ERROR{background:rgba(255,107,94,.07);border-left-color:var(--red)}
+.ln.lv-ERROR .lv,.ln.lv-ERROR .msg{color:var(--red)}
+.ln.lv-UI .lv,.ln.lv-UI .kd,.ln.lv-UI .msg{color:var(--cy)}
+.ln.lv-UI .msg::before{content:"» "}
+.ln.new{animation:flash 1.2s ease-out}
+.ln.tail{display:block;color:var(--g);border:0}
+.ln.tail:hover{background:none}
+.newpill{position:absolute;right:14px;bottom:10px;color:#000;background:var(--amb)}
+.newpill::before,.newpill::after{color:#000}
+
+/* ── status line (tmux-style) & command line ──────────────────────────── */
+.bar{position:fixed;left:0;right:0;bottom:0;z-index:40;display:flex;align-items:stretch;height:26px;background:var(--bg3);
+  border-top:1px solid var(--line2);font-size:.88em;white-space:nowrap;overflow:hidden}
+.seg{display:flex;align-items:center;gap:.8ch;padding:0 1.2ch;border-right:1px solid var(--line)}
+.seg.mode{padding-right:2.4ch;border:0;font-weight:800;letter-spacing:.14em;color:#000;background:var(--g);cursor:pointer;
+  clip-path:polygon(0 0,calc(100% - 9px) 0,100% 50%,calc(100% - 9px) 100%,0 100%)}
+.seg.mode.m-a{background:var(--amb)}.seg.mode.m-r{background:var(--red)}.seg.mode.m-c{background:var(--cy)}
+.seg.mode.blink{animation:mblink 1s steps(1) infinite}
+@keyframes mblink{50%{background:var(--red-bg);color:var(--red)}}
+.ldot{width:.6em;height:.6em;border-radius:50%;background:currentColor;color:var(--dim)}
+.ldot.beat{animation:beat .6s ease-out}
+@keyframes beat{from{box-shadow:0 0 0 0 currentColor}to{box-shadow:0 0 0 6px transparent}}
+.bar .fill{flex:1}
+.seg.errs{color:#000;background:var(--red);font-weight:700;cursor:pointer;border:0}
+.seg.hints{gap:1.6ch;color:var(--dim);border-left:1px solid var(--line)}
+.seg.clk{color:var(--g);border-right:0}
+.cmdl{display:none;flex:1;align-items:center;gap:.4ch;padding:0 1.2ch;color:var(--g);font-weight:700}
+.bar.cmdmode .cmdl{display:flex}
+.bar.cmdmode>:not(.cmdl){display:none}
+#cmd{flex:1;min-width:0;padding:0;border:0;background:none;box-shadow:none;color:var(--hi)}
+.sugg{position:fixed;left:0;bottom:26px;z-index:41;width:min(680px,100vw);max-height:50vh;overflow:auto;padding:4px 0;
+  background:var(--bg3);border:1px solid var(--line2);border-left:0;border-bottom:0}
+.sugg div{padding:1px 1.2ch;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.sugg div:hover,.sugg div.on{background:var(--sel)}
+.sugg b{color:var(--g)}
+
+/* ── toasts & dialogs ─────────────────────────────────────────────────── */
+.toasts{position:fixed;right:16px;bottom:38px;z-index:60;display:flex;flex-direction:column;align-items:flex-end;gap:6px;
+  max-width:calc(100vw - 32px);pointer-events:none}
+.toast{pointer-events:auto;display:flex;align-items:center;gap:1.2ch;max-width:100%;padding:4px 10px 4px 9px;cursor:pointer;
+  background:var(--bg3);border:1px solid var(--line2);border-left:3px solid var(--g);box-shadow:0 8px 24px rgba(0,0,0,.6);animation:tin .18s ease-out}
+.toast .tt{font-weight:700;color:var(--g);white-space:pre}
+.toast .tm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.toast.err{border-left-color:var(--red)}.toast.err .tt{color:var(--red)}
+.toast.info{border-left-color:var(--cy)}.toast.info .tt{color:var(--cy)}
+.toast.out{opacity:0;transform:translateX(12px);transition:opacity .2s,transform .2s}
+@keyframes tin{from{opacity:0;transform:translateY(6px)}}
+.modal{position:fixed;inset:0;z-index:70;display:grid;place-items:center;padding:16px;background:rgba(0,0,0,.72)}
+.box{width:min(700px,100%);max-height:calc(100vh - 32px);overflow:auto;padding:18px 22px;background:var(--bg3);
+  border:3px double var(--line2);box-shadow:0 0 0 1px rgba(var(--g-rgb),.08),0 20px 60px rgba(0,0,0,.8);animation:pop .16s ease-out}
+.box.sm{width:min(460px,100%)}
+@keyframes pop{from{opacity:0;transform:translateY(6px)}}
+.man{display:flex;justify-content:space-between;align-items:center;gap:2ch;margin-bottom:12px;color:var(--dim);font-weight:700}
+.man b{color:var(--g);letter-spacing:.1em}
+.sec{margin:14px 0 6px;color:var(--g);font-weight:700;letter-spacing:.1em}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 2.5ch;margin:0 0 0 2ch}
+.kv dt{color:var(--hi);white-space:nowrap}
+.kv dd{margin:0}
+.box p{margin:0 0 0 2ch}
+.box .end{margin-top:14px;text-align:center;color:var(--dim)}
+.opt{display:flex;align-items:center;gap:1ch;padding:6px 0;border-bottom:1px dotted var(--line)}
+.opt .lb{flex:1}
+.opt small{display:block;color:var(--dim);font-size:.85em}
+.wide-in{display:flex;margin:12px 0 4px}
+.wide-in input{flex:1;margin-left:.5ch}
+
+@media(max-width:900px){.bar .wide{display:none}}
+@media(max-width:760px){
+  .top{padding:8px 12px;gap:6px 12px}
+  .top>.grow,.brand .pr{display:none}
+  .hbtns{order:3;margin-left:auto}
+  .meta{order:5;width:100%}
+  .ctl{order:6;width:100%}
+  main{padding:24px 12px 14px;gap:24px}
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .kpi .n{font-size:1.7em}
+  .chart{height:130px}
+  .log{height:50vh}
+  .ln{grid-template-columns:8ch 5ch minmax(0,1fr)}
+  .ln .msg{grid-column:1/-1;padding-left:2ch}
+  .search{flex:1}.search input{width:100%;flex:1}
+  td:first-child,th:first-child{position:sticky;left:0;z-index:1;background:var(--bg2)}
+  th:first-child{z-index:3}
+  .toasts{left:12px;right:12px;align-items:stretch}
+  .panel.max{inset:12px 6px 34px}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+  .cur{opacity:.7}
+  #prog{display:none}
+}
+@media(prefers-contrast:more){
+  :root{--dim:#86d69a;--line:#2a8a45;--faint:#2f7a40}
+  .crt body::before,.crt body::after{display:none}
+}
+</style></head><body>
+<a class="skip" href="#main">skip to content</a>
+<header class="top" id="top">
+  <div class="brand"><span class="pr" id="prompt"></span><b id="ttl"></b><i class="cur" aria-hidden="true"></i></div>
+  <span id="state" class="state" role="status">····</span>
+  <div class="meta" id="sub"><span class="k">connecting…</span></div>
+  <span class="grow"></span>
+  <form class="ctl" id="ctl" autocomplete="off" novalidate>
+    <label class="fld"><span id="l-rate"></span><input id="f-rate" type="number" min="1" step="any" inputmode="decimal"></label>
+    <label class="fld"><span id="l-order"></span><select id="f-order"></select></label>
+    <span class="srv" id="srv"></span>
+    <button id="apply" type="submit" disabled>apply</button>
+    <button id="toggle" type="button" disabled>—</button>
+  </form>
+  <span class="hbtns"><button type="button" class="ib" id="b-help" title="help · ?">?</button><button type="button" class="ib" id="b-cfg" title="settings · ,">≡</button></span>
+  <i id="prog" aria-hidden="true"></i>
+</header>
+
+<main id="main">
+  <section class="kpis" id="kpis" aria-label="metrics"></section>
+  <div class="row21">
+    <section class="panel" id="p1" data-p="1" tabindex="-1">
+      <div class="chart" id="chartbox"><canvas id="chart" role="img" aria-label="bar chart"></canvas><div class="tip" id="tip" hidden></div></div>
+      <div class="foot" id="chartlbl"></div>
+    </section>
+    <section class="panel" id="p2" data-p="2" tabindex="-1"><div class="dist" id="dist"></div></section>
+  </div>
+  <div class="row11">
+    <section class="panel" id="p3" data-p="3" tabindex="-1"><div class="scroll"><table id="t1"></table><div class="empty" hidden>no rows</div></div></section>
+    <section class="panel" id="p4" data-p="4" tabindex="-1"><div class="scroll"><table id="t2"></table><div class="empty" hidden>no rows</div></div></section>
+  </div>
+  <div class="row75">
+    <section class="panel" id="p5" data-p="5" tabindex="-1">
+      <div class="tools">
+        <div class="chips" id="t3s" role="group" aria-label="status filter"></div>
+        <label class="search"><span>grep</span><input id="f-q" type="text" placeholder="pattern…" spellcheck="false" enterkeyhint="search"><button type="button" class="ib" id="f-qx" title="clear" hidden>×</button></label>
+        <span class="grow"></span>
+        <span class="hint" id="t3hint"></span>
+        <button type="button" class="ib" id="t3cp" title="copy visible rows as TSV">copy</button>
+        <button type="button" class="ib" id="t3re" title="reload now">reload</button>
+      </div>
+      <div class="scroll" id="t3wrap"><table id="t3"></table><div class="empty" hidden>no rows</div></div>
+    </section>
+    <section class="panel" id="p6" data-p="6" tabindex="-1">
+      <div class="tools">
+        <div class="chips" id="lvls" role="group" aria-label="level filter"></div>
+        <label class="search"><span>grep</span><input id="f-grep" type="text" placeholder="filter…" spellcheck="false"><button type="button" class="ib" id="f-grepx" title="clear" hidden>×</button></label>
+        <span class="grow"></span>
+        <button type="button" class="ib" id="follow" aria-pressed="true" title="auto-scroll to the newest line">follow</button>
+        <button type="button" class="ib" id="lcopy" title="copy visible lines">copy</button>
+        <button type="button" class="ib" id="lclear" title="clear this view (the server log is untouched)">clear</button>
+      </div>
+      <div class="logwrap"><div class="log" id="log" tabindex="0" role="log" aria-live="off"></div><button type="button" class="newpill" id="newpill" hidden></button></div>
+    </section>
+  </div>
+</main>
+
+<div id="veil" hidden></div>
+<footer class="bar" id="bar">
+  <span class="seg mode m-a" id="mode" role="button" tabindex="0" title="pause / resume · p">BOOT</span>
+  <span class="seg" title="link · round-trip of the last poll"><i class="ldot" id="ldot"></i><span id="rtt">—</span></span>
+  <span class="seg wide" id="upd"></span>
+  <span class="seg wide" id="pollv"></span>
+  <span class="seg wide" id="skew" hidden></span>
+  <label class="cmdl"><span>:</span><input id="cmd" autocomplete="off" spellcheck="false" aria-label="command"></label>
+  <span class="fill"></span>
+  <span class="seg errs" id="errs" role="button" tabindex="0" title="show errors" hidden></span>
+  <span class="seg hints wide"><span><kbd>?</kbd> help</span><span><kbd>:</kbd> cmd</span><span><kbd>p</kbd> pause</span><span><kbd>/</kbd> search</span><span><kbd>1-6</kbd> panels</span></span>
+  <span class="seg clk" id="clock">--:--:--</span>
+</footer>
+<div class="sugg" id="sugg" hidden></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<div class="modal" id="help" hidden role="dialog" aria-modal="true" aria-label="help"><div class="box" id="helpBody"></div></div>
+<div class="modal" id="cfg" hidden role="dialog" aria-modal="true" aria-label="settings"><div class="box sm" id="cfgBody"></div></div>
+<div class="modal" id="login" hidden role="dialog" aria-modal="true" aria-label="access key">
+  <form class="box sm" id="loginf">
+    <div class="man"><b>AUTH REQUIRED</b><span>X-Ui-Key</span></div>
+    <div class="c-d" id="loginmsg"></div>
+    <label class="fld wide-in"><span>key</span><input id="f-key" type="password" autocomplete="off" spellcheck="false"></label>
+    <div class="end"><button type="submit">connect</button> · <kbd>Enter</kbd> submit · <kbd>Esc</kbd> cancel</div>
+  </form>
+</div>
+
+<script>
+"use strict";
+/* ── labels & tunables: rename anything visible here ─────────────────── */
+const UI = {
+  prompt: "root@farm:~$",
+  title: "farm",
+  state: {on: "RUN", off: "PAUSE"},                // stats.s: false → running, true → paused
+  sub: ["n1", "n2", "n3", "tag"],                  // round · uptime · attack-data age · token
+  rate: "rate", order: "order",
+  orders: {o1: "newest", o2: "oldest"},
+  fields: [                                        // [label, key in stats.m, tone: g c r a d h]
+    ["accepted", "m1", "g"], ["acc/min", "m2", "c"], ["queued", "m3", "c"],
+    ["rejected", "m4", "r"], ["expired", "m5", "d"], ["stolen", "m6", "h"],
+  ],
+  panels: ["Accepted", "Verdicts", "Exploits", "Targets", "Flags", "Events"],
+  t1: ["service", "state", "runs", "err%", "ms"],
+  t2: ["team", "host", "up", "stolen", "acc", "seen"],
+  t3: ["flag", "status", "svc", "team", "tries", "verdict", "age"],
+  tags: {ok: "[ OK ]", hold: "[QUAR]", off: "[OFF ]"},
+  statuses: {s1: "ACCEPTED", s2: "QUEUED", s3: "REJECTED", s4: "EXPIRED", s5: "INFLIGHT"},
+  stTone: {s1: "g", s2: "c", s3: "r", s4: "d", s5: "a"},
+  stGlyph: {s1: "●", s2: "◊", s3: "■", s4: "○", s5: "▲"},
+  a7: "rld", a8: "run",
+  confirm: {a1: 1, a2: 1},                         // pause/resume need a second click
+  pctWarn: 5, pctBad: 25,                          // Exploits err% thresholds
+};
+const TONE = {g: "--g", c: "--cy", r: "--red", a: "--amb", d: "--dim", h: "--hi"};
+
+/* ── helpers ──────────────────────────────────────────────────────────── */
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const ESC = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"};
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ESC[c]);
+const num = v => v == null || v === "" || typeof v === "boolean" ? NaN : +v;
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const pad = n => String(n).padStart(2, "0");
+const clock = ms => { const d = new Date(ms); return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()); };
+const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+const coll = new Intl.Collator(undefined, {numeric: true, sensitivity: "base"});
+const setHTML = (el, h) => { if (el._h !== h) { el._h = h; el.innerHTML = h; } };
+const restart = (el, cls) => { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); };
+const pctS = p => (p > 0 && p < 10 ? p.toFixed(1) : String(Math.round(p))) + "%";
+
+function fmt(v, d){
+  const n = num(v);
+  return isNaN(n) ? (v == null ? "—" : String(v)) : n.toLocaleString("en-US", {maximumFractionDigits: d == null ? 2 : d});
+}
+const fmtH = (v, d) => esc(fmt(v, d));
+function compact(v){
+  const a = Math.abs(v), f = (x, s) => +x.toFixed(Math.abs(x) < 10 ? 1 : 0) + s;
+  if (a >= 1e9) return f(v / 1e9, "G");
+  if (a >= 1e6) return f(v / 1e6, "M");
+  if (a >= 1e4) return f(v / 1e3, "k");
+  return String(+(+v).toFixed(a < 10 ? 2 : a < 100 ? 1 : 0));
+}
+function dur(d){                                   // 3.4s · 42s · 3m05s · 1h02m · 2d04h
+  if (d == null || isNaN(d)) return "—";
+  d = Math.max(0, +d);
+  if (d < 10 && d % 1) return d.toFixed(1) + "s";
+  if (d < 60) return (d | 0) + "s";
+  if (d < 3600) return (d / 60 | 0) + "m" + pad(d % 60 | 0) + "s";
+  if (d < 86400) return (d / 3600 | 0) + "h" + pad((d % 3600) / 60 | 0) + "m";
+  return (d / 86400 | 0) + "d" + pad((d % 86400) / 3600 | 0) + "h";
+}
+function span(d){                                  // short: 45s · 30m · 2h15m
+  if (d < 60) return Math.round(d) + "s";
+  if (d < 3600) return Math.round(d / 60) + "m";
+  const h = d / 3600 | 0, m = Math.round((d % 3600) / 60);
+  return h + "h" + (m ? pad(m) + "m" : "");
+}
+function nice(v){
+  if (!(v > 0)) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v))), f = v / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+}
+function hlText(s, q){                             // escape, then wrap matches of q
+  s = s == null ? "" : String(s);
+  if (!q) return esc(s);
+  const lo = s.toLowerCase();
+  let out = "", i = 0, j;
+  while ((j = lo.indexOf(q, i)) >= 0) { out += esc(s.slice(i, j)) + "<mark>" + esc(s.slice(j, j + q.length)) + "</mark>"; i = j + q.length; }
+  return out + esc(s.slice(i));
+}
+
+/* ── persistent prefs (localStorage may throw: defaults always work) ─── */
+const store = {
+  get(k, d){ try { const v = localStorage.getItem("ui." + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v){ try { localStorage.setItem("ui." + k, JSON.stringify(v)); } catch (e) {} },
+};
+const P = Object.assign({crt: true, compact: false, fs: 13, hideStop: true, fold: [], sort: {}, t3: {s: "", q: ""}, lvl: "ALL"}, store.get("prefs", {}));
+if (!Array.isArray(P.fold)) P.fold = [];
+if (!P.sort || typeof P.sort !== "object") P.sort = {};
+if (!P.t3 || typeof P.t3 !== "object") P.t3 = {s: "", q: ""};
+P.t3 = {s: String(P.t3.s || ""), q: String(P.t3.q || "")};
+if (P.t3.s && !(P.t3.s in UI.statuses)) P.t3.s = "";
+const saveP = () => store.set("prefs", P);
+
+/* ── runtime state ────────────────────────────────────────────────────── */
+const S = {
+  poll: 1500, lock: false, key: "", needKey: false, paused: false,
+  busy: false, again: false, timer: 0, next: 0, t3timer: 0, t3seq: 0, t3hold: false,
+  rtt: 0, skew: 0, skewS: [], stats: null, lastLog: 0, noFlash: true,
+  hp: {}, hist: {}, errs: 0, cur: 1, dirty: false,
+};
+try { S.key = localStorage.getItem("uikey") || ""; } catch (e) {}
+const nowS = () => Date.now() / 1000 + S.skew;    // server-time estimate
+let T1, T2, T3, KP = [];
+const CH = {data: [], bucket: 0, hover: -1, L: 0, bw: 0};
+const LV = ["ALL", "INFO", "WARN", "ERROR", "UI"];
+const LOG = {rows: [], max: 1000, follow: true, unseen: 0, q: "", lvl: LV.includes(P.lvl) ? P.lvl : "ALL", tail: null};
+const CMD = {hist: (h => Array.isArray(h) ? h : [])(store.get("hist", [])), hi: -1};
+
+/* ── network ──────────────────────────────────────────────────────────── */
+async function req(url, opt){
+  opt = opt || {};
+  const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), Math.max(8000, S.poll * 3));
+  const headers = Object.assign({}, opt.headers, S.lock ? {"X-Ui-Key": S.key} : {});
+  try {
+    const r = await fetch(url, Object.assign({}, opt, {headers, signal: ctl.signal, cache: "no-store"}));
+    const dh = r.headers.get("Date");
+    if (dh) noteSkew(Date.parse(dh) / 1000 - Date.now() / 1000);
+    if (r.status === 401 || r.status === 403) {
+      S.lock = true; S.key = "";
+      try { localStorage.removeItem("uikey"); } catch (e) {}
+      askKey("E: access denied · enter a valid key");
+      throw new Error("HTTP " + r.status);
+    }
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return await r.json();
+  } catch (e) {
+    throw e && e.name === "AbortError" ? new Error("timeout") : e;
+  } finally { clearTimeout(to); }
+}
+const post = (code, extra) => req("/api/action", {
+  method: "POST", headers: {"Content-Type": "application/json"},
+  body: JSON.stringify(Object.assign({do: code}, extra || {})),
+});
+function noteSkew(d){                              // median of recent Date headers; ignored under 2s
+  if (!isFinite(d)) return;
+  S.skewS.push(d); if (S.skewS.length > 7) S.skewS.shift();
+  const m = S.skewS.slice().sort((a, b) => a - b)[S.skewS.length >> 1];
+  S.skew = Math.abs(m) > 2 ? m : 0;
+}
+function health(name, ok, err){
+  const h = S.hp[name] || (S.hp[name] = {ok: 0, fails: 0, err: ""});
+  if (ok) { h.ok = Date.now(); h.fails = 0; h.err = ""; }
+  else { h.fails++; h.err = err && err.message ? err.message : String(err || "error"); }
+}
+function isStale(name){
+  const h = S.hp[name];
+  return !!h && h.fails > 0 && (!h.ok || Date.now() - h.ok > S.poll * 3);
+}
+const linkDown = () => !!S.hp.stats && S.hp.stats.fails >= 2;
+
+/* ── live loop: sequential, no overlapping requests, backoff on failure ─ */
+const live = () => !S.paused && !S.needKey && !(P.hideStop && document.hidden);
+function nextDelay(){
+  const f = S.hp.stats ? S.hp.stats.fails : 0;
+  return f ? Math.min(30000, S.poll * Math.pow(2, Math.min(f, 5))) : S.poll;
+}
+async function cycle(){
+  clearTimeout(S.timer);
+  if (S.busy) { S.again = true; return; }
+  S.busy = true;
+  try { if (live()) await pull(); }
+  finally {
+    S.busy = false;
+    if (S.again) { S.again = false; cycle(); }
+    else { const d = nextDelay(); S.next = Date.now() + d; S.timer = setTimeout(cycle, d); progress(d); }
+  }
+}
+async function pull(){
+  const t0 = performance.now(), wasDown = linkDown();
+  const eps = [
+    ["stats", "/api/stats", render], ["list1", "/api/list1", renderT1],
+    ["list2", "/api/list2", renderT2], ["log", "/api/log?since=" + encodeURIComponent(S.lastLog), renderLog],
+  ];
+  const rs = await Promise.allSettled(eps.map(e => req(e[1])));
+  S.rtt = performance.now() - t0;
+  rs.forEach((r, i) => {
+    health(eps[i][0], r.status === "fulfilled", r.reason);
+    if (r.status === "fulfilled") { try { eps[i][2](r.value || {}); } catch (e) { console.error(e); } }
+  });
+  S.noFlash = false;
+  const down = linkDown();
+  if (down !== wasDown) uiLog(down ? "ERROR" : "UI", "link", down ? "link lost · " + S.hp.stats.err : "link restored");
+  if (rs[0].status === "fulfilled") restart($("#ldot"), "beat");
+  paintBar(); paintHealth();
+}
+function t3loop(){
+  clearTimeout(S.t3timer);
+  const sel = getSelection(), selecting = sel && !sel.isCollapsed && $("#t3wrap").contains(sel.anchorNode);
+  if (live() && !S.t3hold && !selecting) loadT3();
+  S.t3timer = setTimeout(t3loop, S.poll * 4);
+}
+function progress(ms){                             // thin bar under the header = time to next poll
+  const p = $("#prog");
+  p.classList.remove("run", "pause", "err");
+  if (!live()) { p.classList.add("pause"); return; }
+  if (linkDown()) p.classList.add("err");
+  void p.offsetWidth;
+  p.style.setProperty("--wait", ms + "ms");
+  p.classList.add("run");
+}
+function refreshAll(manual){
+  cycle(); loadT3();
+  if (manual) toast("refreshing…", "info");
+}
+
+/* ── stats: header, tiles, chart, distribution ────────────────────────── */
+function render(o){
+  const prev = S.stats, off = !!o.s;
+  S.stats = o;
+  if (prev && !!prev.s !== off) {
+    const top = $("#top");
+    top.style.setProperty("--flip", off ? "var(--amb)" : "var(--g)");
+    restart(top, "flip");
+    uiLog("UI", "state", "state → " + (off ? UI.state.off : UI.state.on));
+  }
+  const st = $("#state");
+  st.className = "state " + (off ? "off" : "on");
+  st.textContent = (off ? "■ " : "● ") + (off ? UI.state.off : UI.state.on);
+  paintToggle();
+  setHTML($("#sub"), [
+    [UI.sub[0], o.n1 == null ? null : "#" + fmt(o.n1, 0)],
+    [UI.sub[1], o.n2 == null ? null : dur(num(o.n2))],
+    [UI.sub[2], o.n3 == null ? null : dur(num(o.n3))],
+    [UI.sub[3], o.tag == null ? null : String(o.tag)],
+  ].map(([k, v]) => `<span><span class="k">${esc(k)}</span> ${v == null ? '<b class="c-r">—</b>' : "<b>" + esc(v) + "</b>"}</span>`).join(""));
+  syncCtl(o);
+  renderKpis(o.m || {});
+  CH.data = Array.isArray(o.series) ? o.series.map(v => num(v) || 0) : [];
+  CH.bucket = num(o.bucket) || 0;
+  drawChart();
+  renderDist(o.dist && typeof o.dist === "object" ? o.dist : {});
+}
+
+function renderKpis(m){
+  const t = Date.now();
+  UI.fields.forEach((f, i) => {
+    const el = KP[i];
+    if (!el) return;
+    const v = m[f[1]], n = num(v), h = S.hist[f[1]] || (S.hist[f[1]] = []), txt = fmt(v);
+    if (el.n.textContent !== txt) {
+      el.n.textContent = txt; el.n.title = String(v);
+      if (h.length && !S.noFlash && !reduced.matches) restart(el.n, "bump");
+    }
+    if (!isNaN(n)) { h.push([t, n]); if (h.length > 64) h.shift(); }
+    const vals = h.map(p => p[1]);
+    spark(el.sp, vals);
+    if (h.length > 1) {
+      const last = h[h.length - 1];
+      let base = h[0];
+      for (const p of h) if (last[0] - p[0] <= 60000) { base = p; break; }
+      const dv = last[1] - base[1];
+      el.d.textContent = (dv > 0 ? "▲ " : dv < 0 ? "▼ " : "· ") + compact(Math.abs(dv));
+      el.d.title = "Δ over " + span((last[0] - base[0]) / 1000) + " · min " + compact(Math.min(...vals)) + " · max " + compact(Math.max(...vals));
+    }
+  });
+}
+function spark(box, vals){                         // CSS bars: no font glyphs, no misalignment
+  const bars = box.children, n = bars.length;
+  if (!vals.length) return;
+  const lo = Math.min(...vals), hi = Math.max(...vals), r = hi - lo;
+  for (let i = 0; i < n; i++) {
+    const v = vals[vals.length - n + i];
+    bars[i].style.height = v == null ? "0" : (r ? 12 + (v - lo) / r * 88 : 45) + "%";
+  }
+}
+
+function drawChart(){
+  const box = $("#chartbox"), cv = $("#chart"), tip = $("#tip");
+  const W = box.clientWidth, H = box.clientHeight;
+  if (!W || !H) return;
+  const dpr = window.devicePixelRatio || 1, bw0 = Math.round(W * dpr), bh0 = Math.round(H * dpr);
+  if (cv.width !== bw0 || cv.height !== bh0) { cv.width = bw0; cv.height = bh0; }
+  const x = cv.getContext("2d");
+  x.setTransform(dpr, 0, 0, dpr, 0, 0);
+  x.clearRect(0, 0, W, H);
+  const cs = getComputedStyle(document.documentElement), V = k => cs.getPropertyValue(k).trim();
+  const G = V("--g"), HI = V("--hi"), DIM = V("--dim"), FAINT = V("--faint"), RGB = V("--g-rgb"), LN = V("--line2");
+  const bs = getComputedStyle(document.body), fs = Math.max(9, parseFloat(bs.fontSize) * .78);
+  x.font = fs + "px " + bs.fontFamily;
+  const d = CH.data, n = d.length, mx = n ? Math.max(0, ...d) : 0, top = nice(mx);
+  const labs = [compact(top), compact(top / 2), "0"];
+  const L = Math.ceil(Math.max(...labs.map(s => x.measureText(s).width))) + 10, R = 2, T = fs + 6, B = fs + 8;
+  const pw = Math.max(1, W - L - R), ph = Math.max(1, H - T - B), base = Math.round(T + ph) + .5;
+  CH.L = L; CH.bw = n ? pw / n : 0;
+  // grid, y labels, baseline
+  x.lineWidth = 1; x.strokeStyle = FAINT; x.setLineDash([1, 3]);
+  for (let i = 0; i < 4; i++) { const y = Math.round(T + ph * i / 4) + .5; x.beginPath(); x.moveTo(L, y); x.lineTo(W - R, y); x.stroke(); }
+  x.setLineDash([]);
+  x.fillStyle = DIM; x.textAlign = "right"; x.textBaseline = "middle";
+  x.fillText(labs[0], L - 6, T); x.fillText(labs[1], L - 6, T + ph / 2); x.fillText(labs[2], L - 6, T + ph);
+  x.strokeStyle = LN; x.beginPath(); x.moveTo(L, base); x.lineTo(W - R, base); x.stroke();
+  if (!n) {
+    x.textAlign = "center"; x.fillText("-- no data --", L + pw / 2, T + ph / 2);
+    tip.hidden = true; setHTML($("#chartlbl"), ""); return;
+  }
+  const bw = CH.bw, gap = bw >= 5 ? 1.5 : bw >= 3 ? 1 : 0, w = Math.max(1, bw - gap);
+  const hgt = v => top ? Math.max(0, v) / top * ph : 0;
+  if (CH.hover >= 0 && CH.hover < n) { x.fillStyle = `rgba(${RGB},.08)`; x.fillRect(L + CH.hover * bw, T, bw, ph); }
+  const grad = x.createLinearGradient(0, T, 0, T + ph);
+  grad.addColorStop(0, G); grad.addColorStop(1, `rgba(${RGB},.16)`);
+  let pk = -1;
+  for (let i = 0; i < n; i++) {
+    const v = d[i], h = hgt(v), bx = L + i * bw + gap / 2;
+    if (v === mx && mx > 0) pk = i;
+    if (h < 1) { x.fillStyle = FAINT; x.fillRect(bx, T + ph - 1, w, 1); continue; }
+    if (i === n - 1) continue;                     // newest bar is drawn last, with the glow
+    x.fillStyle = i === CH.hover ? HI : grad;
+    x.fillRect(bx, T + ph - h, w, h);
+  }
+  const lh = hgt(d[n - 1]);
+  if (lh >= 1) {
+    x.save(); x.fillStyle = HI;
+    if (P.crt) { x.shadowColor = `rgba(${RGB},.7)`; x.shadowBlur = 10; }
+    x.fillRect(L + (n - 1) * bw + gap / 2, T + ph - lh, w, lh);
+    x.restore();
+  }
+  if (pk >= 0) {                                   // peak marker
+    const s = "▼ " + compact(mx), tw = x.measureText(s).width;
+    x.fillStyle = HI; x.textAlign = "center"; x.textBaseline = "bottom";
+    x.fillText(s, clamp(L + (pk + .5) * bw, L + tw / 2, W - R - tw / 2), T + ph - hgt(mx) - 3);
+  }
+  const total = n * CH.bucket, yl = T + ph + 5;    // x axis
+  x.fillStyle = DIM; x.textBaseline = "top";
+  if (total) {
+    x.textAlign = "left"; x.fillText("-" + span(total), L, yl);
+    x.textAlign = "center"; x.fillText("-" + span(total / 2), L + pw / 2, yl);
+  }
+  x.textAlign = "right"; x.fillText("now", W - R, yl);
+  if (CH.hover >= 0 && CH.hover < n) {             // tooltip
+    const i = CH.hover, back = n - 1 - i;
+    tip.textContent = (back ? "-" + (CH.bucket ? dur(back * CH.bucket) : back + " bk") : "now") + " · " + fmt(d[i]);
+    tip.hidden = false;
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    tip.style.left = clamp(L + (i + .5) * bw, tw / 2, W - tw / 2) + "px";
+    tip.style.top = Math.max(th + 4, T + ph - hgt(d[i])) + "px";
+  } else tip.hidden = true;
+  const sum = d.reduce((a, b) => a + b, 0);
+  setHTML($("#chartlbl"), (total ? `<span>last <b>${span(total)}</b></span>` : "") +
+    `<span>peak <b>${fmtH(mx)}</b></span><span>avg <b>${fmtH(sum / n)}</b></span><span>Σ <b>${fmtH(sum)}</b></span>` +
+    (CH.bucket ? `<span>bucket <b>${span(CH.bucket)}</b></span>` : ""));
+}
+
+function renderDist(dd){
+  const box = $("#dist"), keys = Object.keys(dd).sort(coll.compare);
+  const vals = keys.map(k => Math.max(0, num(dd[k]) || 0)), tot = vals.reduce((a, b) => a + b, 0), big = Math.max(0, ...vals);
+  const sig = keys.join("\u0001");
+  if (box._sig !== sig) {
+    box._sig = sig;
+    box.innerHTML = keys.length
+      ? keys.map(k => `<span class="dk" title="${esc(k)}">${esc(k)}</span><span class="mtr"><i></i></span><span class="dp"></span><span class="dn"></span>`).join("") +
+        '<span class="dsum">Σ</span><span class="drule"></span><span class="dp">100%</span><span class="dn" id="dtot"></span>'
+      : '<div class="empty">no data</div>';
+  }
+  const I = $$(".mtr i", box), M = $$(".mtr", box), Pc = $$(".dp", box), N = $$(".dn", box);
+  keys.forEach((k, i) => {
+    const pc = tot ? vals[i] * 100 / tot : 0;
+    I[i].style.width = pc + "%";
+    I[i].classList.toggle("top", vals[i] === big && big > 0);
+    Pc[i].textContent = pctS(pc);
+    N[i].textContent = fmt(dd[k]);
+    M[i].title = `${k}: ${fmt(dd[k])} · ${pc.toFixed(1)}%`;
+  });
+  const dt = $("#dtot");
+  if (dt) dt.textContent = fmt(tot);
+  $("#pm2").textContent = keys.length ? keys.length + " buckets" : "";
+}
+
+/* ── tables: keyed in-place patching (hover, focus, clicks survive polls) ─ */
+function defTable(id, cols, keyOf, rowOf, meta){
+  const tbl = $("#" + id), hr = tbl.createTHead().insertRow();
+  const t = {id, tbl, cols, keyOf, rowOf, meta, items: [], tb: tbl.createTBody(), empty: tbl.nextElementSibling, sort: P.sort[id] || null};
+  cols.forEach((c, i) => {
+    const th = document.createElement("th");
+    th.scope = "col"; th.textContent = c.label || "";
+    if (c.num) th.classList.add("num");
+    if (c.key) {
+      th.classList.add("sort"); th.tabIndex = 0; th.title = "sort";
+      th.addEventListener("click", () => sortBy(t, i));
+      th.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sortBy(t, i); } });
+    }
+    hr.appendChild(th);
+  });
+  paintSort(t);
+  return t;
+}
+function sortBy(t, i){                             // asc → desc → server order
+  const s = t.sort;
+  t.sort = !s || s.i !== i ? {i, d: 1} : s.d === 1 ? {i, d: -1} : null;
+  P.sort[t.id] = t.sort; saveP();
+  paintSort(t); drawT(t, true);
+}
+function paintSort(t){
+  $$("th", t.tbl).forEach((th, i) => {
+    if (t.sort && t.sort.i === i) th.setAttribute("aria-sort", t.sort.d > 0 ? "ascending" : "descending");
+    else th.removeAttribute("aria-sort");
+  });
+}
+function drawT(t, quiet){
+  let a = t.items;
+  const c = t.sort && t.cols[t.sort.i];
+  if (c && c.key) {
+    const d = t.sort.d;
+    a = a.map(x => [c.key(x), x]).sort((p, q) => d * (typeof p[0] === "number" && typeof q[0] === "number"
+      ? p[0] - q[0] : coll.compare(String(p[0]), String(q[0])))).map(p => p[1]);
+  }
+  syncRows(t.tb, a, t.keyOf, t.rowOf, quiet);
+  t.empty.hidden = a.length > 0;
+  if (t.meta) t.meta(a);
+}
+function syncRows(tb, items, keyOf, rowOf, quiet){
+  const old = tb._m || new Map(), m = new Map(), fresh = [];
+  const canFlash = !!tb._m && !quiet && !S.noFlash && !reduced.matches;
+  let ref = tb.firstElementChild, flashes = 0;
+  items.forEach((it, idx) => {
+    let k = String(keyOf(it, idx));
+    while (m.has(k)) k += "\u0001";
+    const row = rowOf(it), cls = row[0], cells = row[1];
+    let tr = old.get(k);
+    if (!tr) {
+      tr = document.createElement("tr");
+      tr.innerHTML = cells.join(""); tr._c = cells; fillTimes(tr); fresh.push(tr);
+    } else {
+      for (let i = 0; i < cells.length; i++) {
+        if (tr._c[i] === cells[i]) continue;
+        const td = tr.cells[i];
+        if (!td) { tr.insertAdjacentHTML("beforeend", cells[i]); fillTimes(tr.cells[i]); continue; }
+        td.outerHTML = cells[i];
+        const nt = tr.cells[i];
+        fillTimes(nt);
+        if (canFlash && flashes < 30 && !nt.hasAttribute("data-nf")) { nt.classList.add("flash"); flashes++; }
+      }
+      tr._c = cells;
+    }
+    if (tr._cls !== cls) { tr.className = cls; tr._cls = cls; }
+    m.set(k, tr);
+    if (tr === ref) ref = ref.nextElementSibling; else tb.insertBefore(tr, ref);
+  });
+  old.forEach((tr, k) => { if (m.get(k) !== tr) tr.remove(); });
+  if (canFlash && fresh.length <= 5) fresh.forEach(tr => tr.classList.add("born"));
+  tb._m = m;
+}
+function fillTimes(root){                          // live "ago" and countdown cells, 1 Hz
+  const t = nowS();
+  root.querySelectorAll("[data-ago]").forEach(el => { const v = +el.dataset.ago; el.textContent = v ? dur(t - v) : "—"; });
+  root.querySelectorAll("[data-until]").forEach(el => { el.textContent = dur(+el.dataset.until - t); });
+}
+const tagH = (s, until) => `<span class="tag ${s}">${esc(UI.tags[s])}</span>` + (until ? ` <span class="c-d" data-until="${until}"></span>` : "");
+const meterH = p => `<span class="mm"><i style="width:${p > 0 ? Math.max(4, Math.min(100, p)) : 0}%"></i></span>`;
+const pctTone = p => UI.pctBad != null && p >= UI.pctBad ? "c-r" : UI.pctWarn != null && p >= UI.pctWarn ? "c-a" : "";
+const RANK = {off: 0, hold: 1, ok: 2};
+const st1 = x => !x.on ? "off" : num(x.q) > nowS() ? "hold" : "ok";
+const st2 = t => !t.up ? "off" : num(t.cd) > nowS() ? "hold" : "ok";
+function errp(x){ const a = num(x.a), b = num(x.b); return a ? (b || 0) * 100 / a : 0; }
+function countMeta(id, a, fn){
+  const c = {ok: 0, hold: 0, off: 0};
+  a.forEach(x => { c[fn(x)]++; });
+  setHTML($(id), `${a.length} rows · <span class="c-g">${c.ok} ok</span>` +
+    (c.hold ? ` · <span class="c-a">${c.hold} hold</span>` : "") + (c.off ? ` · <span class="c-r">${c.off} off</span>` : ""));
+}
+function renderT1(o){
+  const e = o.rows && typeof o.rows === "object" ? o.rows : {};
+  T1.items = Object.keys(e).sort(coll.compare).map(k => Object.assign({}, e[k], {k}));
+  drawT(T1);
+}
+function renderT2(o){ T2.items = Array.isArray(o.rows) ? o.rows : []; drawT(T2); }
+
+async function loadT3(quiet){
+  const seq = ++S.t3seq, t0 = performance.now();
+  try {
+    const o = await req("/api/list3?s=" + encodeURIComponent(P.t3.s) + "&q=" + encodeURIComponent(P.t3.q));
+    if (seq !== S.t3seq) return;                   // a newer filter already went out
+    health("list3", true);
+    T3.items = Array.isArray(o.rows) ? o.rows : [];
+    T3.ms = Math.round(performance.now() - t0);
+    if (!P.t3.s) {
+      const c = {"": T3.items.length};
+      T3.items.forEach(f => { const s = String(f.s); c[s] = (c[s] || 0) + 1; });
+      T3.counts = c;
+    }
+    drawT(T3, quiet);
+  } catch (e) { if (seq === S.t3seq) { health("list3", false, e); paintT3meta(); } }
+  paintHealth();
+}
+function paintT3meta(){
+  if (!T3) return;
+  const f = [];
+  if (P.t3.s) f.push(UI.statuses[P.t3.s] || P.t3.s);
+  if (P.t3.q) f.push("“" + P.t3.q + "”");
+  setHTML($("#pm5"), `${T3.items.length} rows` + (f.length ? " · " + esc(f.join(" ")) : "") + (T3.ms ? ` · ${T3.ms}ms` : ""));
+  setHTML($("#t3hint"), S.t3hold ? '<span class="c-a">|| held while the pointer is over the table</span>' : "");
+  const cnt = T3.counts || {};
+  $$("#t3s .chip").forEach(b => {
+    b.setAttribute("aria-pressed", String(b.dataset.s === P.t3.s));
+    const v = cnt[b.dataset.s];
+    $(".n", b).textContent = v == null ? "" : v;
+  });
+}
+function setT3(s, q, force){
+  if (s != null) P.t3.s = s;
+  if (q != null) {
+    q = String(q).trim(); P.t3.q = q;
+    const i = $("#f-q");
+    if (i.value.trim() !== q) i.value = q;
+    $("#f-qx").hidden = !i.value;
+  }
+  saveP(); paintT3meta();
+  if (force !== false) loadT3(true);
+}
+function copyT3(){
+  const rows = $$("tr", T3.tb).map(tr => Array.from(tr.cells).map(td => td.textContent.trim()).join("\t"));
+  copy([UI.t3.join("\t")].concat(rows).join("\n"), rows.length + " rows as TSV");
+}
+
+/* ── log: tail -f, newest at the bottom ───────────────────────────────── */
+const lvOf = e => String(e.level || "INFO").toUpperCase().replace(/[^A-Z]/g, "") || "INFO";
+const logMatch = e => (LOG.lvl === "ALL" || lvOf(e) === LOG.lvl) && (!LOG.q || (String(e.kind) + " " + String(e.msg)).toLowerCase().includes(LOG.q));
+function logEl(e){
+  const d = document.createElement("div"), lv = lvOf(e), ts = num(e.ts);
+  d.className = "ln lv-" + lv;
+  d.innerHTML = `<span class="ts">${isNaN(ts) ? "--:--:--" : clock(ts * 1000)}</span><span class="lv">${esc(lv)}</span>` +
+    `<span class="kd">${hlText(e.kind, LOG.q)}</span><span class="msg">${hlText(e.msg, LOG.q)}</span>`;
+  return d;
+}
+function renderLog(o){
+  const rows = Array.isArray(o.rows) ? o.rows.slice().reverse() : [];   // server sends newest first
+  rows.sort((a, b) => (num(a.id) || 0) - (num(b.id) || 0));
+  if (o.last != null) S.lastLog = o.last;
+  appendLog(rows);
+}
+const uiLog = (level, kind, msg) => appendLog([{ts: nowS(), level, kind, msg}]);
+function appendLog(rows){
+  if (!rows.length) return;
+  LOG.rows.push(...rows);
+  if (LOG.rows.length > LOG.max) LOG.rows.splice(0, LOG.rows.length - LOG.max);
+  rows.forEach(e => { if (lvOf(e) === "ERROR" && LOG.lvl !== "ERROR") S.errs++; });
+  const box = $("#log"), fr = document.createDocumentFragment();
+  let n = 0;
+  rows.forEach(e => {
+    if (!logMatch(e)) return;
+    const el = logEl(e);
+    if (!S.noFlash && !reduced.matches) el.classList.add("new");
+    fr.appendChild(el); n++;
+  });
+  if (n) {
+    box.insertBefore(fr, LOG.tail);
+    let removed = 0;
+    while (box.childElementCount - 1 > LOG.max) { removed += box.firstElementChild.offsetHeight; box.firstElementChild.remove(); }
+    if (LOG.follow) box.scrollTop = box.scrollHeight;
+    else { if (removed) box.scrollTop -= removed; LOG.unseen += n; paintPill(); }
+  }
+  paintLogMeta(); paintErrs();
+}
+function redrawLog(){
+  const box = $("#log"), fr = document.createDocumentFragment();
+  LOG.rows.forEach(e => { if (logMatch(e)) fr.appendChild(logEl(e)); });
+  box.textContent = ""; box.appendChild(fr); box.appendChild(LOG.tail);
+  LOG.unseen = 0; LOG.follow = true; box.scrollTop = box.scrollHeight;
+  paintPill(); paintFollow(); paintLogMeta();
+}
+function onLogScroll(){
+  const b = $("#log"), bottom = b.scrollHeight - b.scrollTop - b.clientHeight < 8;
+  if (bottom !== LOG.follow) { LOG.follow = bottom; paintFollow(); }
+  if (bottom && LOG.unseen) { LOG.unseen = 0; paintPill(); }
+}
+function setFollow(on){
+  LOG.follow = on;
+  if (on) { const b = $("#log"); b.scrollTop = b.scrollHeight; LOG.unseen = 0; paintPill(); }
+  paintFollow();
+}
+function setLevel(l){
+  LOG.lvl = LV.includes(l) ? l : "ALL"; P.lvl = LOG.lvl; saveP();
+  if (LOG.lvl === "ERROR") { S.errs = 0; paintErrs(); }
+  redrawLog();
+}
+function setGrep(v){
+  v = String(v || "");
+  const g = $("#f-grep");
+  if (g.value !== v) g.value = v;
+  $("#f-grepx").hidden = !v;
+  LOG.q = v.trim().toLowerCase();
+  redrawLog();
+}
+function clearLog(){ LOG.rows = []; S.errs = 0; paintErrs(); redrawLog(); toast("log view cleared", "info"); }
+function copyLog(){
+  const lines = LOG.rows.filter(logMatch).map(e => [isNaN(num(e.ts)) ? "--:--:--" : clock(num(e.ts) * 1000), lvOf(e), e.kind, e.msg].join(" "));
+  copy(lines.join("\n"), lines.length + " lines");
+}
+function paintLogMeta(){
+  const c = {ALL: LOG.rows.length};
+  LOG.rows.forEach(e => { const l = lvOf(e); c[l] = (c[l] || 0) + 1; });
+  $$("#lvls .chip").forEach(b => {
+    b.setAttribute("aria-pressed", String(b.dataset.l === LOG.lvl));
+    $(".n", b).textContent = c[b.dataset.l] || 0;
+  });
+  $("#pm6").textContent = ($("#log").childElementCount - 1) + " / " + LOG.rows.length + " lines";
+}
+function paintFollow(){ const b = $("#follow"); b.setAttribute("aria-pressed", String(LOG.follow)); b.textContent = LOG.follow ? "follow" : "held"; }
+function paintPill(){ const p = $("#newpill"); p.hidden = !LOG.unseen; p.textContent = "▼ " + LOG.unseen + " new"; }
+function paintErrs(){ const e = $("#errs"); e.hidden = !S.errs; e.textContent = "ERR " + S.errs; }
+
+/* ── actions ──────────────────────────────────────────────────────────── */
+async function act(code, extra, btn, label, undo){
+  if (btn) { if (btn.classList.contains("busy")) return false; busy(btn, true); }
+  label = label || [code, extra && extra.k, extra && "v" in extra ? "→ " + (extra.v ? "on" : "off") : ""].filter(s => s != null && s !== "").join(" ");
+  try {
+    const r = await post(code, extra);
+    if (r && r.ok === false) throw new Error(r.error || r.msg || "rejected");
+    toast(label, "ok", undo); uiLog("UI", code, label + " · ok");
+    return true;
+  } catch (e) {
+    toast(label + " — " + e.message, "err"); uiLog("ERROR", code, label + " · " + e.message);
+    return false;
+  } finally {
+    if (btn) busy(btn, false);
+    cycle();
+  }
+}
+const SPIN = new Set();
+let spinI = 0;
+function busy(b, on){
+  if (on) { b._txt = b.textContent; b.classList.add("busy"); b.disabled = true; b.textContent = reduced.matches ? "…" : "|"; SPIN.add(b); return; }
+  SPIN.delete(b); b.classList.remove("busy"); b.disabled = false;
+  if (b._txt != null) b.textContent = b._txt;
+  b._txt = null;
+  if (b.id === "toggle") paintToggle();
+  if (b.id === "apply") paintDirty();
+}
+setInterval(() => {                                // ASCII spinner for in-flight buttons
+  if (!SPIN.size || reduced.matches) return;
+  spinI = (spinI + 1) % 4;
+  SPIN.forEach(b => { if (!b.isConnected) SPIN.delete(b); else b.textContent = "|/-\\"[spinI]; });
+}, 120);
+function arm(b){                                   // first click arms, second confirms
+  if (b._armT) { disarm(b); return true; }
+  b._lbl = b.textContent; b.textContent = "sure?"; b.classList.add("armed");
+  b._armT = setTimeout(() => disarm(b), 3000);
+  return false;
+}
+function disarm(b){
+  clearTimeout(b._armT); b._armT = 0; b.classList.remove("armed");
+  if (b._lbl != null) b.textContent = b._lbl;
+  b._lbl = null;
+  if (b.id === "toggle") paintToggle();
+}
+function stateAct(code){
+  const on = code === "a2", back = on ? "a1" : "a2";
+  return [code, null, null, "state → " + (on ? UI.state.on : UI.state.off), () => act(back, null, null, "state → " + (on ? UI.state.off : UI.state.on))];
+}
+function toggleState(){
+  const b = $("#toggle");
+  if (!S.stats || b.classList.contains("busy")) return;
+  const code = S.stats.s ? "a2" : "a1";            // decided from state, never from button text
+  if (UI.confirm[code] && !arm(b)) return;
+  const a = stateAct(code);
+  a[2] = b;
+  act.apply(null, a);
+}
+function paintToggle(){
+  const b = $("#toggle");
+  if (b._armT || b.classList.contains("busy")) return;
+  if (!S.stats) { b.textContent = "—"; b.disabled = true; return; }
+  const off = !!S.stats.s, to = off ? UI.state.on : UI.state.off;
+  b.disabled = false;
+  b.textContent = (off ? "► " : "■ ") + to;
+  b.classList.toggle("warn", !off);
+  b.title = "switch " + to + (UI.confirm[off ? "a2" : "a1"] ? " · click twice" : "") + " · t";
+}
+function syncCtl(o){
+  const fr = $("#f-rate"), fo = $("#f-order");
+  if (o.o != null && !Array.from(fo.options).some(x => x.value === String(o.o))) fo.add(new Option(String(o.o), String(o.o)));
+  if (!S.dirty) {
+    if (document.activeElement !== fr) fr.value = o.r == null ? "" : o.r;
+    if (document.activeElement !== fo && o.o != null) fo.value = String(o.o);
+  }
+  paintDirty();
+}
+function rateOk(){ const v = $("#f-rate").value.trim(); return v !== "" && isFinite(+v) && +v >= 1; }
+function paintDirty(){
+  const st = S.stats, fr = $("#f-rate"), fo = $("#f-order");
+  const dr = !!st && (fr.value.trim() === "" ? st.r != null : +fr.value !== +st.r);
+  const dord = !!st && st.o != null && fo.value !== String(st.o);
+  S.dirty = dr || dord;
+  fr.classList.toggle("edited", dr); fo.classList.toggle("edited", dord);
+  fr.setAttribute("aria-invalid", String(dr && !rateOk()));
+  $("#srv").textContent = S.dirty ? "srv " + fmt(st.r) + " · " + (UI.orders[st.o] || st.o) : "";
+  const ap = $("#apply");
+  if (!ap.classList.contains("busy")) { ap.disabled = !S.dirty || !rateOk(); ap.classList.toggle("dirty", S.dirty && rateOk()); }
+}
+function revertCtl(){
+  if (!S.stats) return;
+  $("#f-rate").value = S.stats.r == null ? "" : S.stats.r;
+  if (S.stats.o != null) $("#f-order").value = String(S.stats.o);
+  paintDirty();
+}
+async function applyRate(e){
+  if (e) e.preventDefault();
+  const fr = $("#f-rate"), o = $("#f-order").value, r = +fr.value;
+  if (!rateOk()) { fr.setAttribute("aria-invalid", "true"); fr.focus(); toast(UI.rate + " must be a number ≥ 1", "err"); return; }
+  const prev = S.stats && S.stats.r != null ? {r: S.stats.r, o: S.stats.o} : null;
+  const lbl = (rr, oo) => `${UI.rate} ${fmt(rr)} · ${UI.order} ${UI.orders[oo] || oo}`;
+  const ok = await act("a3", {r, o}, $("#apply"), lbl(r, o), prev ? () => act("a3", prev, null, lbl(prev.r, prev.o)) : null);
+  if (ok) S.dirty = false;
+}
+
+/* ── small UI services ────────────────────────────────────────────────── */
+function toast(msg, kind, undo){
+  kind = kind || "info";
+  const box = $("#toasts"), el = document.createElement("div");
+  el.className = "toast " + kind;
+  el.setAttribute("role", kind === "err" ? "alert" : "status");
+  el.title = "click to dismiss";
+  el.innerHTML = `<span class="tt">${kind === "ok" ? "[ OK ]" : kind === "err" ? "[FAIL]" : "[INFO]"}</span><span class="tm">${esc(msg)}</span>`;
+  if (undo) {
+    const u = document.createElement("button");
+    u.type = "button"; u.textContent = "undo";
+    u.addEventListener("click", ev => { ev.stopPropagation(); el.remove(); undo(); });
+    el.appendChild(u);
+  }
+  box.appendChild(el);
+  while (box.childElementCount > 4) box.firstElementChild.remove();
+  setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 220); }, kind === "err" ? 7000 : undo ? 6000 : 2600);
+}
+async function copy(text, what){
+  let ok = true;
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) {                                      // http on a LAN address: no async clipboard
+    const t = document.createElement("textarea");
+    t.value = text; t.setAttribute("readonly", ""); t.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+    document.body.appendChild(t); t.select();
+    try { ok = document.execCommand("copy"); } catch (_) { ok = false; }
+    t.remove();
+  }
+  toast(ok ? "copied " + (what || (text.length > 30 ? text.slice(0, 28) + "…" : text)) : "copy failed", ok ? "ok" : "err");
+}
+function favicon(){
+  const st = S.stats, c = linkDown() ? "#ff6b5e" : !st ? "#62a074" : st.s ? "#ffb84d" : "#3dff74";
+  if (favicon.c === c) return;
+  favicon.c = c;
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='2' fill='#030604'/>` +
+    `<path d='M3 4.5 6.5 8 3 11.5' stroke='${c}' stroke-width='1.8' fill='none'/><rect x='8' y='10.6' width='5' height='1.8' fill='${c}'/></svg>`;
+  $("#fav").href = "data:image/svg+xml," + encodeURIComponent(svg);
+}
+function paintBar(){
+  const h = S.hp.stats, down = linkDown(), age = h && h.ok ? (Date.now() - h.ok) / 1000 : null;
+  const stl = age != null && age * 1000 > S.poll * 3 + 500;
+  const [m, c] = S.needKey ? ["AUTH", "a"] : S.paused ? ["PAUSED", "c"] : down ? ["OFFLINE", "r"]
+    : !h || !h.ok ? ["CONNECT", "a"] : stl ? ["STALE", "a"] : ["LIVE", "g"];
+  const md = $("#mode");
+  if (md.textContent !== m) md.textContent = m;
+  md.className = "seg mode m-" + c + (down && !S.paused ? " blink" : "");
+  $("#ldot").style.color = "var(" + (down ? "--red" : stl || !h || !h.ok ? "--amb" : "--g") + ")";
+  $("#rtt").textContent = down
+    ? (h.err || "no link") + (S.next > Date.now() ? " · retry " + Math.ceil((S.next - Date.now()) / 1000) + "s" : "")
+    : h && h.ok ? "rtt " + Math.round(S.rtt) + "ms" : "—";
+  setHTML($("#upd"), `<span class="k">upd</span> ${h && h.ok ? (age < 2 ? "now" : dur(age) + " ago") : "—"}`);
+  setHTML($("#pollv"), `<span class="k">poll</span> ${S.poll / 1000}s`);
+  const sk = $("#skew");
+  sk.hidden = !S.skew;
+  if (S.skew) setHTML(sk, `<span class="k">skew</span> ${S.skew > 0 ? "+" : "-"}${dur(Math.abs(S.skew))}`);
+  $("#clock").textContent = clock(Date.now());
+  const st = S.stats;
+  document.title = (down ? "! " : S.paused ? "|| " : st ? (st.s ? "■ " : "● ") : "") + UI.title + (st && st.n1 != null ? " · #" + st.n1 : "");
+  favicon();
+}
+const PANEL_EP = {1: "stats", 2: "stats", 3: "list1", 4: "list2", 5: "list3", 6: "log"};
+function paintHealth(){
+  Object.keys(PANEL_EP).forEach(p => {
+    const ep = PANEL_EP[p], h = S.hp[ep], bad = isStale(ep), el = $("#ps" + p);
+    panel(p).classList.toggle("stale", bad);
+    const txt = bad ? "stale" + (h.ok ? " " + dur((Date.now() - h.ok) / 1000) : "") + " · " + h.err : "";
+    if (el.textContent !== txt) el.textContent = txt;
+  });
+  $("#kpis").classList.toggle("stale", isStale("stats"));
+}
+
+/* ── panels: jump, fold, maximize ─────────────────────────────────────── */
+const panel = i => $("#p" + i);
+function gotoPanel(i){
+  const p = panel(i);
+  if (!p) return;
+  const mx = $(".panel.max");
+  if (mx && mx !== p) maxPanel(+mx.dataset.p);
+  if (p.classList.contains("fold")) foldPanel(i);
+  S.cur = i;
+  p.scrollIntoView({behavior: reduced.matches ? "auto" : "smooth", block: "start"});
+  p.focus({preventScroll: true});
+  if (!reduced.matches) restart(p, "ping");
+}
+function maxPanel(i){
+  const p = panel(i);
+  if (!p) return;
+  const on = !p.classList.contains("max");
+  $$(".panel.max").forEach(x => { x.classList.remove("max"); paintPanelBtns(x); });
+  if (on) { if (p.classList.contains("fold")) foldPanel(i); p.classList.add("max"); S.cur = +i; }
+  $("#veil").hidden = !on;
+  document.body.classList.toggle("maxed", on);
+  paintPanelBtns(p);
+  if (on) p.focus({preventScroll: true});
+  requestAnimationFrame(drawChart);
+}
+function foldPanel(i){
+  const p = panel(i);
+  if (!p) return;
+  if (p.classList.contains("max")) maxPanel(i);
+  const on = p.classList.toggle("fold");
+  i = +i;
+  P.fold = on ? P.fold.filter(x => x !== i).concat(i) : P.fold.filter(x => x !== i);
+  saveP(); paintPanelBtns(p);
+  if (!on) requestAnimationFrame(drawChart);
+}
+function paintPanelBtns(p){
+  const mx = $("[data-max]", p), fd = $("[data-fold]", p), isMax = p.classList.contains("max"), isFold = p.classList.contains("fold");
+  mx.textContent = isMax ? "■" : "□"; mx.title = isMax ? "restore · Esc" : "maximize · m";
+  fd.textContent = isFold ? "+" : "-"; fd.title = (isFold ? "unfold" : "fold") + " · f";
+}
+
+/* ── prefs, pause, auth ───────────────────────────────────────────────── */
+const OPTS = {
+  crt: ["CRT effects", "scanlines · vignette · glow", "c"],
+  compact: ["compact rows", "denser tables", "d"],
+  hideStop: ["pause in background", "stop polling while the tab is hidden", ""],
+};
+function setScan(){
+  const r = document.documentElement, d = window.devicePixelRatio || 1;
+  r.style.setProperty("--scan", Math.round(3 * d) / d + "px");
+  r.style.setProperty("--sl", 1 / d + "px");
+}
+function applyPrefs(){
+  const r = document.documentElement;
+  r.classList.toggle("crt", !!P.crt);
+  r.classList.toggle("compact", !!P.compact);
+  P.fs = clamp(+P.fs || 13, 10, 20);
+  r.style.setProperty("--fs", P.fs + "px");
+  setScan();
+  requestAnimationFrame(drawChart);
+}
+function setOpt(k){
+  P[k] = !P[k]; saveP(); applyPrefs();
+  if (!$("#cfg").hidden) paintCfg();
+  toast(OPTS[k][0] + " " + (P[k] ? "on" : "off"), "info");
+  if (k === "hideStop") cycle();
+}
+function zoom(d){
+  P.fs = d ? clamp(P.fs + d, 10, 20) : 13; saveP(); applyPrefs();
+  if (!$("#cfg").hidden) paintCfg();
+  toast("font " + P.fs + "px", "info");
+}
+function setPaused(on){
+  if (S.paused === on) return;
+  S.paused = on;
+  uiLog("UI", "feed", on ? "live feed paused" : "live feed resumed");
+  if (on) progress(0); else { S.noFlash = true; cycle(); t3loop(); }
+  paintBar();
+  toast(on ? "live feed paused · p resumes" : "live feed resumed", "info");
+}
+function resetLayout(){
+  $$(".panel.max").forEach(p => maxPanel(+p.dataset.p));
+  $$(".panel.fold").forEach(p => foldPanel(+p.dataset.p));
+  P.fold = []; P.sort = {}; saveP();
+  [T1, T2, T3].forEach(t => { t.sort = null; paintSort(t); drawT(t, true); });
+  toast("layout reset", "info");
+}
+function askKey(msg){
+  S.needKey = true;
+  $("#loginmsg").textContent = msg || "this dashboard is locked · enter the access key";
+  if ($("#login").hidden) { openModal("login"); $("#f-key").value = ""; $("#f-key").focus(); }
+  paintBar(); progress(0);
+}
+function onLogin(e){
+  e.preventDefault();
+  const v = $("#f-key").value;
+  if (!v) return;
+  S.key = v; S.lock = true; S.needKey = false;
+  try { localStorage.setItem("uikey", v); } catch (_) {}
+  closeModal("login"); toast("key saved", "ok"); uiLog("UI", "auth", "key entered");
+  refreshAll();
+}
+function forgetKey(){
+  S.key = "";
+  try { localStorage.removeItem("uikey"); } catch (_) {}
+  closeModal("cfg"); askKey("key forgotten · enter a new one");
+}
+
+/* ── dialogs ──────────────────────────────────────────────────────────── */
+let lastFocus = null;
+function openModal(id){
+  const m = $("#" + id);
+  if (!m.hidden) return;
+  lastFocus = document.activeElement; m.hidden = false;
+  const f = $("input,button", m);
+  if (f) f.focus();
+}
+function closeModal(id){
+  const m = $("#" + id);
+  if (m.hidden) return false;
+  m.hidden = true;
+  if (lastFocus && lastFocus.focus && document.contains(lastFocus)) lastFocus.focus();
+  return true;
+}
+function closeOverlays(){
+  if ($("#bar").classList.contains("cmdmode")) { closeCmd(); return true; }
+  for (const id of ["help", "cfg", "login"]) if (closeModal(id)) return true;
+  const mx = $(".panel.max");
+  if (mx) { maxPanel(+mx.dataset.p); return true; }
+  const armed = $$("button.armed");
+  if (armed.length) { armed.forEach(disarm); return true; }
+  return false;
+}
+const KEYS = [
+  [["?"], "this help"], [[":"], "command line · Tab completes · ↑↓ history"], [[","], "settings"],
+  [["/"], "search " + UI.panels[4]], [["l"], "filter " + UI.panels[5]], [["1-6"], "jump to a panel"],
+  [["m"], "maximize the current panel"], [["f"], "fold the current panel"], [["p"], "pause / resume the live feed"],
+  [["r"], "refresh now"], [["t"], "toggle state (press twice)"], [["c"], "CRT effects"], [["d"], "compact rows"],
+  [["+", "-", "0"], "font size"], [["Esc"], "close · cancel · restore"],
+];
+function openHelp(){
+  const kv = list => `<dl class="kv">${list.join("")}</dl>`;
+  $("#helpBody").innerHTML =
+    `<div class="man"><b>${esc(UI.title.toUpperCase())}(1)</b><span>terminal console</span><button type="button" class="ib" data-close>esc</button></div>` +
+    `<div class="sec">KEYS</div>` + kv(KEYS.map(([k, d]) => `<dt>${k.map(x => "<kbd>" + esc(x) + "</kbd>").join(" ")}</dt><dd>${esc(d)}</dd>`)) +
+    `<div class="sec">COMMANDS</div>` + kv(Object.keys(CMDS).map(n => `<dt>:${n} <span class="c-d">${esc(CMDS[n][0])}</span></dt><dd>${esc(CMDS[n][1])}</dd>`)) +
+    `<div class="sec">STATUS</div>` + kv([
+      `<dt>${Object.keys(UI.tags).map(s => tagH(s)).join(" ")}</dt><dd>${esc(UI.panels[2])} · ${esc(UI.panels[3])}</dd>`,
+      `<dt>${Object.keys(UI.statuses).map(s => `<span class="c-${UI.stTone[s] || "d"}">${UI.stGlyph[s] || "·"} ${esc(UI.statuses[s])}</span>`).join(" ")}</dt><dd>${esc(UI.panels[4])}</dd>`,
+      `<dt><span class="c-c">» UI</span></dt><dd>lines written by this page (actions, link, feed)</dd>`,
+    ]) +
+    `<div class="sec">TIPS</div><p>Click a column header to sort (asc → desc → off). Click keys, hosts or ${esc(UI.t3[0])} values to copy them; ` +
+    `click a ${esc(UI.t3[1])} status to filter by it. ${esc(UI.panels[4])} holds still while the pointer is over it. ` +
+    `Scroll up in ${esc(UI.panels[5])} to stop following. Actions you send show an [UNDO] for a few seconds.</p>` +
+    `<div class="end">-- press ? or Esc to close --</div>`;
+  openModal("help");
+}
+function paintCfg(){
+  $("#cfgBody").innerHTML =
+    `<div class="man"><b>SETTINGS</b><button type="button" class="ib" data-close>esc</button></div>` +
+    Object.keys(OPTS).map(k => `<div class="opt"><span class="lb">${esc(OPTS[k][0])}<small>${esc(OPTS[k][1])}${OPTS[k][2] ? " · key " + OPTS[k][2] : ""}</small></span>` +
+      `<button type="button" data-opt="${k}" aria-pressed="${!!P[k]}">${P[k] ? "on" : "off"}</button></div>`).join("") +
+    `<div class="opt"><span class="lb">font size<small>keys + - 0</small></span><button type="button" data-zoom="-1">-</button><span class="c-h">${P.fs}px</span><button type="button" data-zoom="1">+</button></div>` +
+    `<div class="opt"><span class="lb">layout<small>unfold panels · reset sorting</small></span><button type="button" data-reset>reset</button></div>` +
+    (S.lock ? `<div class="opt"><span class="lb">access key<small>${S.key ? "stored in this browser" : "not set"}</small></span><button type="button" class="warn" data-forget>forget</button></div>` : "");
+}
+function openCfg(){ paintCfg(); openModal("cfg"); }
+
+/* ── command line (:) ─────────────────────────────────────────────────── */
+const usage = n => toast("usage: :" + n + " " + CMDS[n][0], "err");
+const CMDS = {
+  help: ["", "this help", () => openHelp()],
+  on: ["", "switch state " + UI.state.on, () => act.apply(null, stateAct("a2"))],
+  off: ["", "switch state " + UI.state.off, () => act.apply(null, stateAct("a1"))],
+  rate: ["<n>", "set " + UI.rate + " and apply", a => {
+    if (!a[0]) return usage("rate");
+    $("#f-rate").value = a[0]; paintDirty(); applyRate();
+  }],
+  order: ["<" + Object.keys(UI.orders).join("|") + ">", "set " + UI.order + " and apply", a => {
+    const w = a.join(" ").toLowerCase(), o = Object.keys(UI.orders).find(k => k.toLowerCase() === w || String(UI.orders[k]).toLowerCase() === w);
+    if (!o) return usage("order");
+    $("#f-order").value = o; paintDirty(); applyRate();
+  }],
+  pause: ["", "pause the live feed", () => setPaused(true)],
+  resume: ["", "resume the live feed", () => setPaused(false)],
+  refresh: ["", "refresh every panel now", () => refreshAll(true)],
+  filter: ["[all|s1…s5] [text]", "filter " + UI.panels[4], a => {
+    let s = P.t3.s;
+    if (a.length && (a[0].toLowerCase() === "all" || a[0].toLowerCase() in UI.statuses)) { const w = a.shift().toLowerCase(); s = w === "all" ? "" : w; }
+    setT3(s, a.join(" "));
+  }],
+  grep: ["[text]", "filter " + UI.panels[5] + " lines", a => setGrep(a.join(" "))],
+  level: ["<all|info|warn|error|ui>", UI.panels[5] + " level", a => setLevel((a[0] || "all").toUpperCase())],
+  clear: ["", "clear the " + UI.panels[5] + " view", clearLog],
+  max: ["[1-6]", "maximize a panel", a => maxPanel(+a[0] || S.cur)],
+  fold: ["[1-6]", "fold / unfold a panel", a => foldPanel(+a[0] || S.cur)],
+  crt: ["", "toggle CRT effects", () => setOpt("crt")],
+  compact: ["", "toggle compact rows", () => setOpt("compact")],
+  zoom: ["<+|-|0>", "font size", a => zoom(a[0] === "+" ? 1 : a[0] === "-" ? -1 : 0)],
+  settings: ["", "open settings", openCfg],
+  key: ["", "enter the access key", () => askKey("enter the access key")],
+  do: ["<code> [k] [on|off]", "send a raw action", a => {
+    if (!/^a\d+$/i.test(a[0] || "")) return usage("do");
+    const ex = {};
+    if (a[1] != null) ex.k = a[1];
+    if (a[2] != null) ex.v = /^(on|1|true|yes)$/i.test(a[2]);
+    act(a[0].toLowerCase(), Object.keys(ex).length ? ex : null);
+  }],
+};
+function openCmd(pre){
+  $("#bar").classList.add("cmdmode");
+  const c = $("#cmd");
+  c.value = pre || ""; CMD.hi = -1; c.focus(); suggest();
+}
+function closeCmd(){
+  $("#bar").classList.remove("cmdmode");
+  $("#sugg").hidden = true;
+  const c = $("#cmd");
+  if (document.activeElement === c) c.blur();
+}
+function onCmdKey(e){
+  if (e.key === "Enter") { e.preventDefault(); const v = e.target.value.trim(); closeCmd(); if (v) runCmd(v); }
+  else if (e.key === "Tab") { e.preventDefault(); complete(); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); histNav(1); }
+  else if (e.key === "ArrowDown") { e.preventDefault(); histNav(-1); }
+}
+function runCmd(line){
+  line = line.replace(/^:+/, "").trim();
+  if (!line) return;
+  CMD.hist = [line].concat(CMD.hist.filter(x => x !== line)).slice(0, 50);
+  store.set("hist", CMD.hist);
+  const a = line.split(/\s+/), name = a.shift().toLowerCase(), c = CMDS[name];
+  if (!c) { toast("unknown command: " + name + " · try :help", "err"); return; }
+  try { c[2](a); } catch (e) { toast(name + ": " + e.message, "err"); }
+}
+function suggest(){
+  const v = $("#cmd").value.replace(/^:+/, ""), sp = v.search(/\s/), w = (sp < 0 ? v : v.slice(0, sp)).toLowerCase();
+  const names = Object.keys(CMDS).filter(n => sp < 0 ? n.startsWith(w) : n === w), box = $("#sugg");
+  if (!names.length) { box.hidden = true; return; }
+  box.innerHTML = names.map((n, i) => `<div data-c="${n}" class="${i ? "" : "on"}"><b>${n}</b> ${esc(CMDS[n][0])} <span class="c-d">— ${esc(CMDS[n][1])}</span></div>`).join("");
+  box.hidden = false;
+}
+function complete(){
+  const c = $("#cmd"), w = c.value.replace(/^:+/, "").toLowerCase();
+  if (/\s/.test(w)) return;
+  const names = Object.keys(CMDS).filter(n => n.startsWith(w));
+  if (names.length === 1) c.value = names[0] + " ";
+  else if (names.length > 1) {
+    let p = names[0];
+    names.forEach(n => { while (!n.startsWith(p)) p = p.slice(0, -1); });
+    if (p.length > w.length) c.value = p;
+  }
+  suggest();
+}
+function histNav(d){
+  if (!CMD.hist.length) return;
+  CMD.hi = clamp(CMD.hi + d, -1, CMD.hist.length - 1);
+  $("#cmd").value = CMD.hi < 0 ? "" : CMD.hist[CMD.hi];
+  suggest();
+}
+
+/* ── keyboard (works on any layout: letters are read from e.code) ─────── */
+function keyOf(e){
+  if (/^Key[A-Z]$/.test(e.code) && !e.shiftKey) return e.code.slice(3).toLowerCase();
+  if (e.code === "Slash") return e.shiftKey ? "?" : "/";
+  if (e.code === "Semicolon" && e.shiftKey) return ":";
+  if (e.code === "Comma" && !e.shiftKey) return ",";
+  if (/^Digit[0-9]$/.test(e.code) && !e.shiftKey) return e.code.slice(5);
+  return e.key;
+}
+function focusIn(id, p){
+  const pn = panel(p);
+  if (pn.classList.contains("fold")) foldPanel(p);
+  S.cur = p;
+  const i = $("#" + id);
+  i.focus(); i.select();
+}
+const HOT = {
+  "?": () => $("#help").hidden ? openHelp() : closeModal("help"),
+  ",": () => $("#cfg").hidden ? openCfg() : closeModal("cfg"),
+  ":": () => openCmd(),
+  "/": () => focusIn("f-q", 5), "l": () => focusIn("f-grep", 6),
+  "p": () => setPaused(!S.paused), "r": () => refreshAll(true), "t": toggleState,
+  "m": () => maxPanel(S.cur), "f": () => foldPanel(S.cur),
+  "c": () => setOpt("crt"), "d": () => setOpt("compact"),
+  "+": () => zoom(1), "=": () => zoom(1), "-": () => zoom(-1), "0": () => zoom(0),
+};
+function onKey(e){
+  if (e.key === "Escape") {
+    if (closeOverlays()) { e.preventDefault(); return; }
+    if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) e.target.blur();
+    return;
+  }
+  if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+  if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+  const k = keyOf(e);
+  if (!$("#login").hidden) return;
+  if ((!$("#help").hidden || !$("#cfg").hidden) && k !== "?" && k !== ",") return;
+  if (/^[1-6]$/.test(k)) { e.preventDefault(); gotoPanel(+k); return; }
+  const f = HOT[k];
+  if (f) { e.preventDefault(); f(); }
+}
+
+/* ── delegated clicks ─────────────────────────────────────────────────── */
+function onClick(e){
+  const t = e.target;
+  if (!t.closest) return;
+  const a = t.closest("[data-act]");
+  if (a) {
+    const code = a.dataset.act, ex = {k: a.dataset.k};
+    if (a.dataset.v != null) ex.v = a.dataset.v === "1";
+    if (UI.confirm[code] && !arm(a)) return;
+    act(code, ex, a, null, "v" in ex ? () => act(code, {k: ex.k, v: !ex.v}) : null);
+    return;
+  }
+  const fs = t.closest("[data-fs]");
+  if (fs) { setT3(fs.dataset.fs === P.t3.s ? "" : fs.dataset.fs, null); return; }
+  const cp = t.closest("[data-copy]");
+  if (cp) { if (!String(getSelection())) copy(cp.dataset.copy); return; }
+  const mx = t.closest("[data-max]");
+  if (mx) { maxPanel(+mx.dataset.max); return; }
+  const fd = t.closest("[data-fold]");
+  if (fd) { foldPanel(+fd.dataset.fold); return; }
+  const op = t.closest("[data-opt]");
+  if (op) { setOpt(op.dataset.opt); return; }
+  const zm = t.closest("[data-zoom]");
+  if (zm) { zoom(+zm.dataset.zoom); return; }
+  if (t.closest("[data-reset]")) { resetLayout(); return; }
+  if (t.closest("[data-forget]")) { forgetKey(); return; }
+  if (t.closest("[data-close]")) closeOverlays();
+}
+
+/* ── build & wire ─────────────────────────────────────────────────────── */
+function build(){
+  $("#prompt").textContent = UI.prompt;
+  $("#ttl").textContent = UI.title;
+  $("#l-rate").textContent = UI.rate;
+  $("#l-order").textContent = UI.order;
+  Object.keys(UI.orders).forEach(k => $("#f-order").add(new Option(UI.orders[k], k)));
+  $$(".panel").forEach(p => {
+    const i = +p.dataset.p;
+    p.insertAdjacentHTML("afterbegin", `<div class="ph"><span class="pt" id="pt${i}"><kbd>${i}</kbd>${esc(UI.panels[i - 1] || "Panel " + i)}</span>` +
+      `<span class="pm" id="pm${i}"></span><span class="ps" id="ps${i}"></span>` +
+      `<span class="pa"><button type="button" class="ib" data-max="${i}"></button><button type="button" class="ib" data-fold="${i}"></button></span></div>`);
+    p.setAttribute("aria-labelledby", "pt" + i);
+    if (P.fold.includes(i)) p.classList.add("fold");
+    paintPanelBtns(p);
+  });
+  $("#kpis").innerHTML = UI.fields.map(f => `<div class="kpi" style="--c:var(${TONE[f[2]] || "--g"})">` +
+    `<div class="l"><span>${esc(f[0])}</span><span class="d"></span></div><div class="n">—</div>` +
+    `<div class="sp">${"<i></i>".repeat(32)}</div></div>`).join("");
+  KP = $$(".kpi").map(k => ({n: $(".n", k), d: $(".d", k), sp: $(".sp", k)}));
+  $("#t3s").innerHTML = [["", "all", "g", ""]].concat(Object.keys(UI.statuses).map(s => [s, UI.statuses[s], UI.stTone[s] || "d", UI.stGlyph[s] || ""]))
+    .map(([s, l, c, g]) => `<button type="button" class="chip" data-s="${esc(s)}" style="--c:var(${TONE[c]})">${g ? `<span class="gl">${g}</span>` : ""}${esc(l)}<span class="n"></span></button>`).join("");
+  $("#lvls").innerHTML = LV.map(l => `<button type="button" class="chip" data-l="${l}" style="--c:var(${l === "WARN" ? "--amb" : l === "ERROR" ? "--red" : l === "UI" ? "--cy" : "--g"})">${l.toLowerCase()}<span class="n"></span></button>`).join("");
+  $("#f-q").value = P.t3.q; $("#f-qx").hidden = !P.t3.q;
+  LOG.tail = document.createElement("div");
+  LOG.tail.className = "ln tail";
+  LOG.tail.innerHTML = '<span class="c-d">$</span> <i class="cur" aria-hidden="true"></i>';
+  $("#log").appendChild(LOG.tail);
+
+  T1 = defTable("t1", [
+    {label: UI.t1[0], key: x => x.k},
+    {label: UI.t1[1], key: x => RANK[st1(x)]},
+    {label: UI.t1[2], num: 1, key: x => num(x.a) || 0},
+    {label: UI.t1[3], num: 1, key: errp},
+    {label: UI.t1[4], num: 1, key: x => num(x.c) || 0},
+    {label: ""},
+  ], x => x.k, x => {
+    const s = st1(x), p = errp(x), k = esc(x.k);
+    return [x.on ? "" : "dis", [
+      `<td><span class="key" data-copy="${k}">${k}</span></td>`,
+      `<td>${tagH(s, s === "hold" ? num(x.q) : 0)}</td>`,
+      `<td class="num">${fmtH(x.a)}</td>`,
+      `<td class="num ${pctTone(p)}" title="${esc(fmt(x.b))} / ${esc(fmt(x.a))}">${meterH(p)}${pctS(p)}</td>`,
+      `<td class="num">${fmtH(num(x.c) | 0)}</td>`,
+      `<td class="act"><span class="acts">` +
+        `<button type="button" class="${x.on ? "warn" : ""}" data-act="a5" data-k="${k}" data-v="${x.on ? 0 : 1}" title="a5 · switch ${x.on ? "off" : "on"}">${x.on ? "off" : "on"}</button>` +
+        `<button type="button" data-act="a7" data-k="${k}" title="a7 · ${k}">${esc(UI.a7)}</button>` +
+        `<button type="button" data-act="a8" data-k="${k}" title="a8 · ${k}">${esc(UI.a8)}</button></span></td>`,
+    ]];
+  }, a => countMeta("#pm3", a, st1));
+
+  T2 = defTable("t2", [
+    {label: UI.t2[0], key: t => t.id},
+    {label: UI.t2[1], key: t => t.h || ""},
+    {label: UI.t2[2], key: t => RANK[st2(t)]},
+    {label: UI.t2[3], num: 1, key: t => num(t.x) || 0},
+    {label: UI.t2[4], num: 1, key: t => num(t.y) || 0},
+    {label: UI.t2[5], num: 1, key: t => -(num(t.seen) || 0)},
+    {label: ""},
+  ], t => t.id, t => {
+    const s = st2(t), id = esc(t.id), h = esc(t.h || "");
+    return [t.off ? "dis" : "", [
+      `<td><span class="key" data-copy="${id}">${id}</span></td>`,
+      `<td class="c-d">${h ? `<span data-copy="${h}">${h}</span>` : ""}</td>`,
+      `<td>${tagH(s, s === "hold" ? num(t.cd) : 0)}</td>`,
+      `<td class="num">${fmtH(t.x)}</td>`,
+      `<td class="num c-g">${fmtH(t.y)}</td>`,
+      `<td class="num c-d" data-nf><span data-ago="${num(t.seen) || 0}"></span></td>`,
+      `<td class="act"><span class="acts"><button type="button" class="${t.off ? "" : "warn"}" data-act="a6" data-k="${id}" data-v="${t.off ? 1 : 0}" title="a6 · switch ${t.off ? "on" : "off"}">${t.off ? "on" : "off"}</button></span></td>`,
+    ]];
+  }, a => countMeta("#pm4", a, st2));
+
+  T3 = defTable("t3", [
+    {label: UI.t3[0], key: f => f.v == null ? "" : f.v},
+    {label: UI.t3[1], key: f => f.s == null ? "" : f.s},
+    {label: UI.t3[2], key: f => f.g || ""},
+    {label: UI.t3[3], key: f => f.t || ""},
+    {label: UI.t3[4], num: 1, key: f => num(f.k) || 0},
+    {label: UI.t3[5], key: f => f.note || ""},
+    {label: UI.t3[6], num: 1, key: f => -(num(f.ts) || 0)},
+  ], (f, i) => f.v != null ? f.v + "\u0001" + f.ts : "#" + i, f => {
+    const s = f.s == null ? "" : String(f.s), q = P.t3.q.toLowerCase(), v = esc(f.v);
+    return ["", [
+      `<td class="tok" data-copy="${v}" title="${v} · click to copy">${hlText(f.v, q)}</td>`,
+      `<td><span class="st c-${UI.stTone[s] || "d"}" data-fs="${esc(s)}" title="filter by ${esc(UI.statuses[s] || s)}"><span class="gl">${UI.stGlyph[s] || "·"}</span>${esc(UI.statuses[s] || s || "—")}</span></td>`,
+      `<td>${hlText(f.g, q)}</td>`,
+      `<td>${hlText(f.t, q)}</td>`,
+      `<td class="num">${fmtH(f.k)}</td>`,
+      `<td class="c-d">${hlText(f.note, q)}</td>`,
+      `<td class="num c-d" data-nf><span data-ago="${num(f.ts) || 0}"></span></td>`,
+    ]];
+  }, paintT3meta);
+  T3.counts = null; T3.ms = 0;
+
+  paintT3meta(); paintFollow(); paintLogMeta(); paintToggle();
+}
+
+function bind(){
+  document.addEventListener("click", onClick);
+  document.addEventListener("keydown", onKey);
+  const track = e => { const p = e.target.closest && e.target.closest(".panel"); if (p) S.cur = +p.dataset.p; };
+  document.addEventListener("pointerdown", track);
+  document.addEventListener("focusin", track);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { S.noFlash = true; cycle(); t3loop(); } paintBar(); });
+  addEventListener("resize", setScan);
+  // header form
+  const fr = $("#f-rate"), fo = $("#f-order");
+  $("#ctl").addEventListener("submit", applyRate);
+  fr.addEventListener("input", paintDirty);
+  fo.addEventListener("change", paintDirty);
+  $("#ctl").addEventListener("keydown", e => { if (e.key === "Escape" && S.dirty) { e.stopPropagation(); revertCtl(); } });
+  $("#toggle").addEventListener("click", toggleState);
+  $("#b-help").addEventListener("click", openHelp);
+  $("#b-cfg").addEventListener("click", openCfg);
+  // status line
+  const md = $("#mode");
+  md.addEventListener("click", () => setPaused(!S.paused));
+  md.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPaused(!S.paused); } });
+  const showErrs = () => { S.errs = 0; paintErrs(); setLevel("ERROR"); gotoPanel(6); };
+  $("#errs").addEventListener("click", showErrs);
+  $("#errs").addEventListener("keydown", e => { if (e.key === "Enter") showErrs(); });
+  // chart hover
+  const cv = $("#chart");
+  cv.addEventListener("pointermove", e => {
+    const r = cv.getBoundingClientRect(), i = Math.floor((e.clientX - r.left - CH.L) / (CH.bw || 1));
+    const h = i >= 0 && i < CH.data.length ? i : -1;
+    if (h !== CH.hover) { CH.hover = h; drawChart(); }
+  });
+  cv.addEventListener("pointerleave", () => { CH.hover = -1; drawChart(); });
+  if (window.ResizeObserver) new ResizeObserver(() => drawChart()).observe($("#chartbox"));
+  else addEventListener("resize", drawChart);
+  // Panel 5
+  $("#t3s").addEventListener("click", e => { const b = e.target.closest(".chip"); if (b) setT3(b.dataset.s, null); });
+  const q = $("#f-q");
+  let qt = 0;
+  q.addEventListener("input", () => { $("#f-qx").hidden = !q.value; clearTimeout(qt); qt = setTimeout(() => { if (q.value.trim() !== P.t3.q) setT3(null, q.value); }, 300); });
+  q.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); clearTimeout(qt); setT3(null, q.value); }
+    else if (e.key === "Escape" && q.value) { e.stopPropagation(); clearTimeout(qt); setT3(null, ""); }
+  });
+  $("#f-qx").addEventListener("click", () => { clearTimeout(qt); setT3(null, ""); q.focus(); });
+  $("#t3re").addEventListener("click", () => loadT3(true));
+  $("#t3cp").addEventListener("click", copyT3);
+  const w = $("#t3wrap");
+  w.addEventListener("pointerenter", e => { if (e.pointerType === "mouse") { S.t3hold = true; paintT3meta(); } });
+  w.addEventListener("pointerleave", () => { if (S.t3hold) { S.t3hold = false; paintT3meta(); } });
+  // Panel 6
+  $("#lvls").addEventListener("click", e => { const b = e.target.closest(".chip"); if (b) setLevel(b.dataset.l); });
+  const g = $("#f-grep");
+  let gt = 0;
+  g.addEventListener("input", () => { $("#f-grepx").hidden = !g.value; clearTimeout(gt); gt = setTimeout(() => setGrep(g.value), 150); });
+  g.addEventListener("keydown", e => { if (e.key === "Escape" && g.value) { e.stopPropagation(); clearTimeout(gt); setGrep(""); } });
+  $("#f-grepx").addEventListener("click", () => { clearTimeout(gt); setGrep(""); g.focus(); });
+  $("#log").addEventListener("scroll", onLogScroll, {passive: true});
+  $("#follow").addEventListener("click", () => setFollow(!LOG.follow));
+  $("#newpill").addEventListener("click", () => setFollow(true));
+  $("#lcopy").addEventListener("click", copyLog);
+  $("#lclear").addEventListener("click", clearLog);
+  // command line & dialogs
+  const c = $("#cmd");
+  c.addEventListener("keydown", onCmdKey);
+  c.addEventListener("input", () => { CMD.hi = -1; suggest(); });
+  c.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== c) closeCmd(); }, 150));
+  $("#sugg").addEventListener("pointerdown", e => {
+    const d = e.target.closest("[data-c]");
+    if (d) { e.preventDefault(); c.value = d.dataset.c + " "; c.focus(); suggest(); }
+  });
+  $("#loginf").addEventListener("submit", onLogin);
+  $$(".modal").forEach(m => m.addEventListener("click", e => { if (e.target === m && m.id !== "login") closeModal(m.id); }));
+  $("#veil").addEventListener("click", () => { const p = $(".panel.max"); if (p) maxPanel(+p.dataset.p); });
+  $("#toasts").addEventListener("click", e => { const t = e.target.closest(".toast"); if (t) t.remove(); });
+  setInterval(() => { fillTimes(document); paintBar(); paintHealth(); }, 1000);
+}
+
+async function boot(){
+  build(); bind(); applyPrefs(); paintBar();
+  try { if (!sessionStorage.getItem("ui.on")) { sessionStorage.setItem("ui.on", "1"); if (!reduced.matches) $("#main").classList.add("power"); } } catch (e) {}
+  uiLog("UI", "boot", "terminal ui · " + UI.title);
+  const t0 = performance.now();
+  try {
+    const c = await req("/api/settings");
+    S.poll = clamp(num(c.refresh_ms) || 1500, 250, 60000);
+    S.lock = !!c.lock;
+    uiLog("UI", "boot", `GET /api/settings · ${Math.round(performance.now() - t0)}ms · poll ${S.poll}ms · lock ${S.lock ? "on" : "off"}`);
+  } catch (e) { uiLog("ERROR", "boot", "GET /api/settings · " + e.message + " · using defaults"); }
+  if (S.lock && !S.key) askKey();
+  await cycle();
+  if (S.hp.stats && S.hp.stats.ok) uiLog("UI", "boot", "live feed online · rtt " + Math.round(S.rtt) + "ms");
+  t3loop();
+}
+boot();
+</script></body></html>

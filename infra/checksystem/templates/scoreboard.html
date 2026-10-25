@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="5">
+  <title>A&amp;D Scoreboard — tick {{ board.tick }}</title>
+  <style>
+    :root{
+      --bg:#0e1116; --panel:#161b22; --line:#30363d; --fg:#e6edf3; --muted:#8b949e;
+      --up:#2ea043; --corrupt:#d29922; --mumble:#db6d28; --down:#f85149; --me:#1f6feb;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--fg);
+         font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    header{padding:18px 22px;border-bottom:1px solid var(--line);display:flex;
+           align-items:baseline;gap:16px;flex-wrap:wrap}
+    h1{font-size:18px;margin:0;letter-spacing:.5px}
+    .tick{color:var(--muted)}
+    .wrap{padding:16px 22px}
+    table{border-collapse:collapse;width:100%;max-width:980px}
+    th,td{padding:9px 12px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+    th{color:var(--muted);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.6px}
+    tr.me td{background:rgba(31,111,235,.12)}
+    tr.me .team::before{content:"★ ";color:var(--me)}
+    .rank{color:var(--muted);width:34px}
+    .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;color:#0e1116}
+    .UP{background:var(--up)} .CORRUPT{background:var(--corrupt)}
+    .MUMBLE{background:var(--mumble)} .DOWN{background:var(--down);color:#fff} .ERR{background:var(--muted)}
+    .na{color:var(--muted)}
+    .num{font-variant-numeric:tabular-nums}
+    .total{font-weight:700}
+    footer{color:var(--muted);padding:6px 22px 24px;max-width:980px}
+    code{background:var(--panel);padding:1px 6px;border-radius:5px;border:1px solid var(--line)}
+    .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ATTACK &amp; DEFENSE · SCOREBOARD</h1>
+    <span class="tick">tick #{{ board.tick }} · refreshes every 5s</span>
+  </header>
+  <div class="wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="rank">#</th>
+          <th>team</th>
+          {% for s in board.services %}<th>{{ s }}</th>{% endfor %}
+          <th>attack</th>
+          <th>lost</th>
+          <th>sla</th>
+          <th>total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in board.teams %}
+        <tr class="{{ 'me' if r.is_me else '' }}">
+          <td class="rank">{{ loop.index }}</td>
+          <td class="team">{{ r.team }}</td>
+          {% for s in board.services %}
+            {% set code = r.services[s] %}
+            <td>{% if code %}<span class="pill {{ names[code] }}">{{ names[code] }}</span>{% else %}<span class="na">—</span>{% endif %}</td>
+          {% endfor %}
+          <td class="num">{{ r.attack }}</td>
+          <td class="num">{{ r.lost }}</td>
+          <td class="num">{{ r.sla }}%</td>
+          <td class="num total">{{ r.total }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <footer>
+      <div class="legend">
+        <span class="pill UP">UP</span><span class="pill CORRUPT">CORRUPT</span>
+        <span class="pill MUMBLE">MUMBLE</span><span class="pill DOWN">DOWN</span>
+      </div>
+      <p>total = attack&times;10 + sla%. ★ = your team (<code>{{ my_team }}</code>).
+         Flag ids: <code>/api/flag_ids</code> · submit: <code>POST /flags</code> (header <code>X-Team-Token</code>).</p>
+    </footer>
+  </div>
+</body>
+</html>

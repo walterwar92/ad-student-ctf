@@ -1,0 +1,26 @@
+# runtime data (flags db, service state) — never commit
+**/data/
+*.db
+*.db-wal
+*.db-shm
+# native-run working dirs (run_local.py)
+run/
+
+# farm runtime + any real-platform configs (may hold your team token — don't commit)
+farm/farm.log
+farm/config.local.py
+farm/config.prod.py
+
+# defense runtime
+defense/filter.log
+*.pcap
+
+# python
+**/__pycache__/
+**/*.pyc
+.venv/
+venv/
+
+# os / editor
+.DS_Store
+Thumbs.db
