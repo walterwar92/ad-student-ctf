@@ -131,10 +131,14 @@ def search_notes():
     if uid is None:
         return jsonify({"error": "unauthorized"}), 401
     q = request.args.get("q", "")
-    sql = "SELECT id,title,body FROM notes WHERE user_id=%d AND (title LIKE '%%%s%%' OR body LIKE '%%%s%%')" % (uid, q, q)
+    # Parameterized query: q is bound as data, never parsed as SQL. The server
+    # adds the wildcards, so benign substring search is unchanged, while the
+    # UNION/comment payload becomes a harmless literal -> SQLi closed.
+    like = "%" + q + "%"
+    sql = "SELECT id,title,body FROM notes WHERE user_id=? AND (title LIKE ? OR body LIKE ?)"
     try:
         with _db_lock:
-            rows = _conn.execute(sql).fetchall()
+            rows = _conn.execute(sql, (uid, like, like)).fetchall()
     except sqlite3.Error:
         return jsonify({"error": "bad query"}), 400
     notes = [{"id": r["id"], "title": r["title"], "body": r["body"]} for r in rows]
