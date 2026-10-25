@@ -26,6 +26,14 @@ import runtime        # noqa: E402
 from engine import Engine  # noqa: E402
 from util import get_logger  # noqa: E402
 
+# Optional: spread outbound attacks across all WireGuard tunnels when launched
+# with FARM_VPN_MARKS set (see deploy/wg-multi). Completely inert otherwise.
+if os.environ.get("FARM_VPN_MARKS"):
+    try:
+        import vpn_balance  # noqa: F401,E402
+    except Exception as _e:  # noqa: BLE001
+        print("[vpn_balance] disabled: %r" % _e, file=sys.stderr)
+
 
 def load_config(path):
     spec = importlib.util.spec_from_file_location("farm_config", path)

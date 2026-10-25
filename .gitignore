@@ -24,3 +24,10 @@ venv/
 # os / editor
 .DS_Store
 Thumbs.db
+
+# deploy secrets / organizer artifacts — NEVER commit (token + WireGuard keys)
+deploy/deploy.env
+farm/config.prod.py
+*.conf
+deploy/wg-multi/conf/*
+!deploy/wg-multi/conf/.gitkeep

@@ -1,0 +1,3 @@
+# Drop the organizers' WireGuard configs here: team1.conf, team1b.conf, ...
+# Everything in this folder is GITIGNORED (configs hold your private keys).
+# Then from this PC:  ./deploy/deploy.sh wg-push   &&   ./deploy/deploy.sh wg up

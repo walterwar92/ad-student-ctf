@@ -1,0 +1,35 @@
+# systemd unit for the A&D battle farm (installed by deploy/deploy.sh as
+# /etc/systemd/system/ad-ctf-farm.service). Placeholders __DIR__ / __PY__ are
+# substituted on install. The farm is launched from the repo ROOT because
+# sploit_paths in the config are repo-root-relative.
+#
+# It runs headless (--no-open: never tries to spawn a browser) but keeps the
+# GUI/control API bound to 127.0.0.1:<gui.port> — reach it from your PC over an
+# SSH tunnel (deploy/windows/farm-dashboard.ps1), so the control API is never
+# exposed on the game network.
+#
+# FARM_VPN_MARKS (written by wg-multi.sh into /etc/ad-ctf/vpn.env) makes the farm
+# round-robin its outbound exploit traffic across all WireGuard tunnels. If the
+# file is absent the farm behaves exactly as normal (single default route).
+
+[Unit]
+Description=A&D Student CTF battle farm
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__DIR__
+EnvironmentFile=-/etc/ad-ctf/vpn.env
+ExecStart=__PY__ farm/farm.py --config farm/config.prod.py --loop --no-open
+Restart=on-failure
+RestartSec=3
+# Attacks need raw outbound sockets + SO_MARK (CAP_NET_ADMIN). On the team box
+# the farm runs as root; tighten if you run it unprivileged (then SO_MARK needs
+# CAP_NET_ADMIN granted explicitly and vpn balancing may be disabled).
+User=root
+KillSignal=SIGINT
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target
