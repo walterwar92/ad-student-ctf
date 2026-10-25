@@ -35,7 +35,7 @@ CONFIG = {
     # vnek/StillAttached stay listed as reminders until their exploits are written.
     "services": {
         "muha": 8000,            # Flask/SQLite "ферма мух" — sploit READY
-        "vnek": 28080,           # Go "вНеконтакте" — TODO: farm/sploits/vnek.py
+        "vnek": 28080,           # Go "вНеконтакте" — sploit READY (unauth vault IDOR)
         "StillAttached": 18080,  # FastAPI web + pwn engine (engine:31337 internal) — TODO
     },
 
@@ -43,7 +43,7 @@ CONFIG = {
     # Confirm each name matches the checker's task name in attack_data before relying on it.
     "sploit_paths": {
         "muha": "farm/sploits/muha.py",
-        # "vnek": "farm/sploits/vnek.py",
+        "vnek": "farm/sploits/vnek.py",
         # "StillAttached": "farm/sploits/stillattached.py",
     },
 
