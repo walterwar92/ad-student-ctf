@@ -72,6 +72,8 @@ def get(token, key):
         user = TOKENS.get(token)
     if user is None:
         return "ERR badtoken"
+    if not safe_name(key):   # reject "/", "\", "..", leading "." -> closes path traversal (CWE-22)
+        return "ERR notfound"
     path = os.path.join(BASE, user, key)
     try:
         with open(path, "r", encoding="utf-8") as fh:
