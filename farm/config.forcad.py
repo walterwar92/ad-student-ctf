@@ -49,7 +49,9 @@ CONFIG = {
 
     "attackdata": {
         "mode": "http_json",
-        "url": "http://10.10.10.10/api/client/attack_data",
+        # trailing slash is required: /api/client/attack_data 308-redirects to it,
+        # and urllib does not reliably follow 308 (verified live on the game server).
+        "url": "http://10.10.10.10/api/client/attack_data/",
         "format": "forcad",
         "poll_seconds": None,                  # None -> use round_seconds
     },
